@@ -1,0 +1,8 @@
+bin/
+*.o
+*.obj
+*.exe
+tools/*/framework/
+**/dbgterm.ini
+Record/
+.vscode/

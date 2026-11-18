@@ -1,0 +1,34 @@
+// ToolSets application icon & version resource
+// Icon ID must match UI_COMMON_APP_ICON_ID in framework/ui_common.h
+#include <windows.h>
+#include "version.h"
+
+1 ICON "app.ico"
+
+1 VERSIONINFO
+FILEVERSION     VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,0
+PRODUCTVERSION  VERSION_MAJOR,VERSION_MINOR,VERSION_PATCH,0
+FILEFLAGSMASK   0x3fL
+FILEFLAGS       0x0L
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "CompanyName",      "herongshun"
+            VALUE "FileDescription",  "ToolSets - Windows utilities in pure C"
+            VALUE "FileVersion",      VERSION_STR
+            VALUE "InternalName",     "toolsets"
+            VALUE "OriginalFilename", "toolsets.exe"
+            VALUE "ProductName",      "toolsets"
+            VALUE "ProductVersion",   VERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 1200
+    END
+END
