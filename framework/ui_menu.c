@@ -85,6 +85,7 @@ typedef struct UI_MENU_CTX_TAG
     const wchar_t *p_title;                           /**< 主界面标题 */
     const wchar_t *p_subtitle;                        /**< 副标题 */
     const wchar_t *p_footer;                          /**< 页脚文本 */
+    UI_MENU_CMD_FN pfn_cmd;                           /**< 菜单命令回调(可空) */
 } UI_MENU_CTX_T;
 
 /* -------------------------------------------------------------------------- */
@@ -442,6 +443,13 @@ static LRESULT CALLBACK ui_menu_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM 
             InvalidateRect(hwnd, NULL, FALSE);
             return 0;
         }
+        case WM_COMMAND:
+        {
+            if ((p_ctx->pfn_cmd != NULL) && (LOWORD(wp) != 0u)) {
+                p_ctx->pfn_cmd(p_ctx->h_inst, hwnd, (uint32_t)LOWORD(wp));
+            }
+            return 0;
+        }
         case WM_ERASEBKGND:
         {
             return (LRESULT)1;   /* WM_PAINT经内存DC全幅自绘 */
@@ -557,7 +565,8 @@ HWND ui_menu_window_open(HINSTANCE h_inst, HWND h_owner,
                          const wchar_t *p_title,
                          const wchar_t *p_subtitle,
                          const wchar_t *p_footer,
-                         const UI_MENU_ITEM_T *p_items, uint32_t count)
+                         const UI_MENU_ITEM_T *p_items, uint32_t count,
+                         HMENU h_menu, UI_MENU_CMD_FN pfn_cmd)
 {
     static uint8_t s_class_ready = 0u;
     WNDCLASSW wc;
@@ -598,6 +607,7 @@ HWND ui_menu_window_open(HINSTANCE h_inst, HWND h_owner,
     p_ctx->p_title = p_title;
     p_ctx->p_subtitle = p_subtitle;
     p_ctx->p_footer = p_footer;
+    p_ctx->pfn_cmd = pfn_cmd;
     for (i = 0u; i < count; i++) {
         p_ctx->items[i] = p_items[i];
     }
@@ -616,6 +626,10 @@ HWND ui_menu_window_open(HINSTANCE h_inst, HWND h_owner,
     if (h_wnd == NULL) {
         (void)HeapFree(GetProcessHeap(), 0u, p_ctx);
         return NULL;
+    }
+
+    if (h_menu != NULL) {
+        (void)SetMenu(h_wnd, h_menu);   /* 可选菜单栏(命令经pfn_cmd回调) */
     }
 
     ShowWindow(h_wnd, SW_SHOWNORMAL);

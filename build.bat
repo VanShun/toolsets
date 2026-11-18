@@ -6,7 +6,7 @@ cd /d "%~dp0"
 set CC=gcc
 set WINDRES=windres
 set CFLAGS=-std=c99 -O2 -Wall -Wextra -D_WIN32_WINNT=0x0501
-set LIBS=-lgdi32 -luser32 -lcomctl32 -lshell32 -lole32
+set LIBS=-lgdi32 -luser32 -lcomctl32 -lshell32 -lole32 -lwininet
 set SRC_APP=app
 set SRC_FW=framework
 set OUT=bin
@@ -29,9 +29,10 @@ if errorlevel 1 (
 
 echo [2/4] building application ...
 rem --- To add a tool: append its module sources to the list below ---
-%CC% %CFLAGS% -mwindows -I. -I%SRC_FW% -o %OUT%\toolsets.exe ^
+%CC% %CFLAGS% -mwindows -I. -I%SRC_APP% -I%SRC_FW% -o %OUT%\toolsets.exe ^
     %SRC_APP%\main.c ^
     %SRC_APP%\tool_manifest.c ^
+    %SRC_APP%\updater.c ^
     %SRC_FW%\ui_common.c ^
     %SRC_FW%\ui_menu.c ^
     tools\hexascii\tool_hexascii.c ^
