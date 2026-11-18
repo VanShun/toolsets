@@ -1,0 +1,23 @@
+framework/ui_common.c
+  s_6ec8c668b5ee1e::t_fe497832d5e3b7 40-41,44
+version.h
+  s_6ec8c668b5ee1e::t_dfaca015fe0a06 18,21-22
+CHANGELOG.md
+  s_6ec8c668b5ee1e::t_177a9e681be2e9 5-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "22fce16d9adf78c7ee56e99bf353b70a871b8774",
+  "prompts": {},
+  "sessions": {
+    "s_6ec8c668b5ee1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4634b95e-8dd0-451c-9050-4e05c2830dcb",
+        "model": "glm-5.3"
+      },
+      "human_author": "herongshun <herongshun@yaxon.com>"
+    }
+  }
+}
