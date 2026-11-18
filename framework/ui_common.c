@@ -139,6 +139,18 @@ void ui_common_fill_round_rect(HDC hdc, const RECT *p_rc, uint32_t radius,
     DeleteObject(h_pen);
 }
 
+void ui_common_text_crisp(HDC hdc, const RECT *p_rc, const wchar_t *p_text,
+                          UINT format, uint32_t bk)
+{
+    if (p_text == NULL) {
+        return;
+    }
+    (void)SetBkColor(hdc, (COLORREF)bk);
+    (void)SetBkMode(hdc, OPAQUE);
+    (void)DrawTextW(hdc, p_text, -1, (RECT *)p_rc, format);
+    (void)SetBkMode(hdc, TRANSPARENT);   /* 恢复, 不影响后续绘制 */
+}
+
 /**
  * @brief   将宽字符串文本复制到系统剪贴板
  * @param   h_owner 剪贴板打开所有者窗口

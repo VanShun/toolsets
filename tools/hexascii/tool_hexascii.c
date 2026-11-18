@@ -258,10 +258,13 @@ static void tool_hex_draw_button(HDC hdc, uint32_t index)
     SetBkMode(hdc, TRANSPARENT);
     ui_common_fill_round_rect(hdc, &rc, TOOL_HEX_BTN_RADIUS, fill_clr, border_clr, TOOL_HEX_BTN_BORDER_W);
 
+    /* 文字内缩后按不透明模式绘制(启用真ClearType, 修复中文发虚) */
+    InflateRect(&rc, -9, -7);
     h_font_old = (HFONT)SelectObject(hdc, ui_common_get_font(
                      (primary != TOOL_HEX_FALSE) ? UI_FONT_KIND_BTN_COLOR : UI_FONT_KIND_BTN));
     SetTextColor(hdc, (COLORREF)text_clr);
-    DrawTextW(hdc, g_tool_hex_btn_labels[index], -1, &rc, (DT_CENTER | DT_VCENTER | DT_SINGLELINE));
+    ui_common_text_crisp(hdc, &rc, g_tool_hex_btn_labels[index],
+                         (DT_CENTER | DT_VCENTER | DT_SINGLELINE), fill_clr);
     (void)SelectObject(hdc, h_font_old);
 }
 

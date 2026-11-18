@@ -279,10 +279,14 @@ static void ui_menu_draw_card(const UI_MENU_CTX_T *p_ctx, HDC hdc, uint32_t inde
     h_font_old = (HFONT)SelectObject(hdc, ui_common_get_font(UI_FONT_KIND_ICON));
     SetTextColor(hdc, (COLORREF)UI_MENU_CLR_CARD_BG);
     if (p_item->p_icon != NULL) {
-        DrawTextW(hdc, p_item->p_icon, -1, &rc_badge, (DT_CENTER | DT_VCENTER | DT_SINGLELINE));
+        /* 图标字形: 内缩使不透明背景留在圆形徽章内 */
+        InflateRect(&rc_badge, -8, -8);
+        ui_common_text_crisp(hdc, &rc_badge, p_item->p_icon,
+                             (DT_CENTER | DT_VCENTER | DT_SINGLELINE), badge_clr);
+        InflateRect(&rc_badge, 8, 8);
     }
 
-    /* 名称与描述 */
+    /* 名称与描述(卡片为纯色底, 按不透明模式绘制启用真ClearType) */
     rc_text.left = rc_badge.right + (LONG)UI_MENU_TEXT_MARGIN;
     rc_text.right = rc.right - (LONG)(UI_MENU_ARROW_W + UI_MENU_ARROW_MARGIN);
     rc_text.top = rc.top + (LONG)UI_MENU_NAME_OFF_Y;
@@ -290,8 +294,9 @@ static void ui_menu_draw_card(const UI_MENU_CTX_T *p_ctx, HDC hdc, uint32_t inde
     SetTextColor(hdc, (COLORREF)name_clr);
     (void)SelectObject(hdc, ui_common_get_font(UI_FONT_KIND_CARD_NAME));
     if (p_item->p_name != NULL) {
-        DrawTextW(hdc, p_item->p_name, -1, &rc_text,
-                  (DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS));
+        ui_common_text_crisp(hdc, &rc_text, p_item->p_name,
+                             (DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS),
+                             fill_clr);
     }
 
     rc_text.top = rc.top + (LONG)UI_MENU_DESC_OFF_Y;
@@ -299,8 +304,9 @@ static void ui_menu_draw_card(const UI_MENU_CTX_T *p_ctx, HDC hdc, uint32_t inde
     SetTextColor(hdc, (COLORREF)desc_clr);
     (void)SelectObject(hdc, ui_common_get_font(UI_FONT_KIND_CARD_DESC));
     if (p_item->p_desc != NULL) {
-        DrawTextW(hdc, p_item->p_desc, -1, &rc_text,
-                  (DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS));
+        ui_common_text_crisp(hdc, &rc_text, p_item->p_desc,
+                             (DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS),
+                             fill_clr);
     }
 
     /* 右侧箭头(置灰项不带箭头) */

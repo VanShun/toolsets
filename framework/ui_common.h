@@ -64,6 +64,20 @@ void ui_common_fill_round_rect(HDC hdc, const RECT *p_rc, uint32_t radius,
                                uint32_t fill_color, uint32_t border_color, uint32_t border_width);
 
 /**
+ * @brief   清晰文字绘制(OPAQUE背景模式): GDI对中文雅黑在TRANSPARENT模式下
+ *          会降级为灰度抗锯齿导致发虚, 本助手用不透明模式绘制以启用真ClearType
+ *          (调用方须已选入字体并设置文字色; 文字矩形须完全位于纯色区域内)
+ * @param   hdc     目标设备上下文
+ * @param   p_rc    文字矩形(完全位于纯色背景内, 勿覆盖圆角/渐变)
+ * @param   p_text  文本
+ * @param   format  DrawTextW格式标志
+ * @param   bk      背景色(=文字所在区域的填充色)
+ * @return  无
+ */
+void ui_common_text_crisp(HDC hdc, const RECT *p_rc, const wchar_t *p_text,
+                          UINT format, uint32_t bk);
+
+/**
  * @brief   将宽字符串文本复制到系统剪贴板
  * @param   h_owner 剪贴板打开所有者窗口
  * @param   p_text  待复制文本(以'\0'结尾)
