@@ -1,0 +1,43 @@
+app/updater.h
+  s_6ec8c668b5ee1e::t_c66d111dc858cb 1-32
+framework/ui_menu.c
+  s_6ec8c668b5ee1e::t_d791b22a69fd3f 88
+  s_6ec8c668b5ee1e::t_4f592a6c1f88b4 568-569
+  s_6ec8c668b5ee1e::t_d5e70c37c654bc 610
+  s_6ec8c668b5ee1e::t_2ace95ca87040a 631-634
+  s_6ec8c668b5ee1e::t_2c4196155d299c 446-452
+app/main.c
+  s_6ec8c668b5ee1e::t_0660f6d8809ada 4,6-7,16,25-92,141-142,147
+  s_6ec8c668b5ee1e::t_a9ad4a0c820ed1 148
+version.h
+  s_6ec8c668b5ee1e::t_95e46f2e84bb31 17,21-22
+CHANGELOG.md
+  s_6ec8c668b5ee1e::t_3f904521ce4237 5-16
+framework/ui_menu.h
+  s_6ec8c668b5ee1e::t_e7facafea86791 30-32,35-36,45-46,53-54
+app/updater.c
+  s_6ec8c668b5ee1e::t_06315efa29a00a 1-109,111-112,115-116,119-124,126-158,160-163,189-417,420,425-586,588-598,607,609-666
+  s_6ec8c668b5ee1e::t_931826738c67fd 587
+  s_6ec8c668b5ee1e::t_8aa7b8e53e161c 599-606,608
+  s_6ec8c668b5ee1e::t_dfd34dd66f78c0 110,113-114,117-118,125,159,164-188
+  s_6ec8c668b5ee1e::t_3aabade87e08f1 418-419,421-424
+build.bat
+  s_6ec8c668b5ee1e::t_0d6875184b2b10 32,35
+  s_6ec8c668b5ee1e::t_2ae6e94b7b4e82 9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7dd21e2cb2b60b01097a2bc75f0afc1932e7f9a7",
+  "prompts": {},
+  "sessions": {
+    "s_6ec8c668b5ee1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4634b95e-8dd0-451c-9050-4e05c2830dcb",
+        "model": "glm-5.3"
+      },
+      "human_author": "herongshun <herongshun@yaxon.com>"
+    }
+  }
+}
