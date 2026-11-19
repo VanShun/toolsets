@@ -1,11 +1,11 @@
 /**
  * @file    tool_dbgterm.c
  * @author  herongshun
- * @date    2026-11-16
+ * @date    2026-11-19
  * @brief   调试终端主窗口实现(单窗体形态, 对标 SSCOM/getsscom)
- *          菜单栏(文件/连接/视图/帮助) + 工具栏(连接/断开/清空)
- *          + 接收区(弹性主体) + 过滤行 + 发送行 + 状态栏(6格)
- *          ADB 连接配置经 adb_dlg 模态对话框打开; 串口为"连接"菜单占位项(第二阶段)
+ *          菜单栏(文件/连接/视图/帮助) + 接收区(RichEdit, 多彩关键字着色)
+ *          + 发送行(自绘发送按钮) + 状态栏(6格)
+ *          连接/断开经连接菜单; 清空显示在视图菜单; 串口为占位项(第二阶段)
  */
 
 #include <windows.h>
@@ -19,6 +19,7 @@
 #include "dbg_frame.h"
 #include "dbg_filter.h"
 #include "filter_view.h"
+#include "color_view.h"
 #include "dbg_conf.h"
 #include "dbg_save.h"
 #include "version.h"
@@ -27,20 +28,17 @@
 /* -------------------------------------------------------------------------- */
 /*  宏定义: 控件ID                                                             */
 /* -------------------------------------------------------------------------- */
-#define TOOL_DBG_IDC_ED_RX         2010u  /**< 接收区(只读) */
+#define TOOL_DBG_IDC_ED_RX         2010u  /**< 接收区(RichEdit/EDIT只读) */
 #define TOOL_DBG_IDC_ED_TX         2011u  /**< 发送输入框 */
 #define TOOL_DBG_IDC_CK_TS         2013u  /**< 时间戳开关 */
 #define TOOL_DBG_IDC_CK_PAUSE      2014u  /**< 暂停显示开关 */
 #define TOOL_DBG_IDC_CK_APPEND     2015u  /**< 发送追加回车开关 */
 
 /* 自绘按钮逻辑ID */
-#define TOOL_DBG_IDC_BTN_CONNECT   2101u  /**< 连接(打开ADB连接对话框) */
-#define TOOL_DBG_IDC_BTN_DISCONNECT 2102u /**< 断开 */
-#define TOOL_DBG_IDC_BTN_CLEAR     2103u  /**< 清空 */
 #define TOOL_DBG_IDC_BTN_SEND      2104u  /**< 发送 */
 
 /* 菜单项ID */
-#define TOOL_DBG_MID_CLEAR         3001u  /**< 文件-清空显示 */
+#define TOOL_DBG_MID_CLEAR         3001u  /**< 视图-清空显示 */
 #define TOOL_DBG_MID_EXIT          3002u  /**< 文件-退出 */
 #define TOOL_DBG_MID_ADB_CONNECT   3003u  /**< 连接-ADB连接… */
 #define TOOL_DBG_MID_DISCONNECT    3004u  /**< 连接-断开连接 */
@@ -48,6 +46,7 @@
 #define TOOL_DBG_MID_PAUSE         3006u  /**< 视图-暂停显示 */
 #define TOOL_DBG_MID_FILTERWIN     3012u  /**< 视图-过滤窗口(独立) */
 #define TOOL_DBG_MID_STRIPDEV      3016u  /**< 视图-精简设备时间戳 */
+#define TOOL_DBG_MID_COLORWIN      3017u  /**< 视图-多彩关键字(独立配置窗) */
 #define TOOL_DBG_MID_ABOUT         3011u  /**< 帮助-关于 */
 #define TOOL_DBG_MID_SAVE_NOW      3013u  /**< 文件-立即保存 */
 #define TOOL_DBG_MID_AUTOSAVE      3014u  /**< 文件-自动保存到文件 */
@@ -78,25 +77,19 @@
 #define TOOL_DBG_WND_WIDTH      900u                    /**< 初始宽度 */
 #define TOOL_DBG_WND_HEIGHT     640u                    /**< 初始高度 */
 #define TOOL_DBG_MIN_TRACK_W    720u                    /**< 最小轨宽 */
-#define TOOL_DBG_MIN_TRACK_H    480u                    /**< 最小轨高 */
+#define TOOL_DBG_MIN_TRACK_H    440u                    /**< 最小轨高 */
 
 #define TOOL_DBG_MARGIN         14u    /**< 页边距 */
 #define TOOL_DBG_CTRL_H         26u    /**< 单行控件高 */
 #define TOOL_DBG_CK_H           24u    /**< 复选框高 */
 #define TOOL_DBG_ROW_GAP        10u    /**< 行距 */
 #define TOOL_DBG_CTRL_GAP       8u     /**< 同行控件间距 */
-#define TOOL_DBG_ROW_TOOLBAR_Y  10u    /**< 工具栏行Y */
-#define TOOL_DBG_RX_Y           52u    /**< 接收区顶Y */
+#define TOOL_DBG_RX_Y           14u    /**< 接收区顶Y */
 
-#define TOOL_DBG_BTN_BAR_W      96u    /**< 工具栏连接/断开按钮宽 */
-#define TOOL_DBG_BTN_BAR_H      32u    /**< 工具栏按钮高 */
 #define TOOL_DBG_BTN_TX_W       90u    /**< 发送按钮宽 */
 #define TOOL_DBG_BTN_TX_H       32u    /**< 发送按钮高 */
 
 #define TOOL_DBG_TX_H           32u    /**< 发送行高 */
-#define TOOL_DBG_FILTER_H       26u    /**< 过滤行高 */
-#define TOOL_DBG_COMBO_GRP_W    90u    /**< 过滤组下拉宽度 */
-#define TOOL_DBG_COMBO_FMODE_W  160u   /**< 显示模式下拉宽度 */
 #define TOOL_DBG_CK_W           100u   /**< 复选框宽度 */
 
 /* -------------------------------------------------------------------------- */
@@ -106,13 +99,42 @@
 #define TOOL_DBG_TIMER_RX_MS    100u                      /**< 接收刷新周期(毫秒) */
 #define TOOL_DBG_MSG_RX         (WM_APP + 1u)             /**< 数据到达通知消息 */
 #define TOOL_DBG_MSG_STATUS     (WM_APP + 2u)             /**< 连接状态通知消息 */
-#define TOOL_DBG_BTN_COUNT      4u                        /**< 自绘按钮数量 */
+#define TOOL_DBG_BTN_COUNT      1u                        /**< 自绘按钮数量(发送) */
 #define TOOL_DBG_RX_CAP_WCHAR   (256u * 1024u)            /**< 接收区文本上限(宽字符) */
 #define TOOL_DBG_TX_MAX_WCHAR   512u                      /**< 发送输入宽字符上限 */
 #define TOOL_DBG_LINE_BUF_WCHAR (DBG_FRAME_LINE_MAX * 2u) /**< 行缓冲宽字符容量 */
 #define TOOL_DBG_TX_UTF8_MAX    2048u                     /**< 发送UTF-8字节缓冲容量 */
 #define TOOL_DBG_TEXT_TEMP_MAX  1024u                     /**< 通用文本临时缓冲 */
 #define TOOL_DBG_STATUS_PARTS   6u                        /**< 状态栏格数 */
+
+/* 接收区RichEdit与多彩关键字 */
+#define TOOL_DBG_RICHED_DLL     L"riched20.dll"            /**< RichEdit组件库 */
+#define TOOL_DBG_RICHED_CLASS   L"RichEdit20W"             /**< RichEdit窗口类 */
+#define TOOL_DBG_EM_SETCHARFORMAT (WM_USER + 68)           /**< 设置字符格式消息 */
+#define TOOL_DBG_SCF_SELECTION  0x0001u                    /**< 作用于当前选区 */
+#define TOOL_DBG_CFM_COLOR      0x40000000u                /**< 颜色掩码 */
+#define TOOL_DBG_COLOR_MAX      32u                        /**< 多彩关键字词条上限 */
+#define TOOL_DBG_COLOR_KW_WCHAR 64u                        /**< 关键字宽字符容量 */
+#define TOOL_DBG_COLOR_SEG_MAX  48u                        /**< 单行着色片段上限(超出降级纯文本) */
+#define TOOL_DBG_COLOR_LINE_LIMIT 150u                     /**< 单拍着色行数上限(洪峰降级) */
+
+/* -------------------------------------------------------------------------- */
+/*  内部类型                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/** RichEdit字符格式(CHARFORMATW布局, 本地定义避免头文件差异) */
+typedef struct TOOL_CF_TAG
+{
+    UINT      cbSize;                 /**< 结构大小 */
+    DWORD     dwMask;                 /**< 有效字段掩码 */
+    DWORD     dwEffects;              /**< 字符效果 */
+    LONG      yHeight;                /**< 字高 */
+    LONG      yOffset;                /**< 基线偏移 */
+    COLORREF  crTextColor;            /**< 文字色 */
+    BYTE      bCharSet;               /**< 字符集 */
+    BYTE      bPitchAndFamily;        /**< 字族 */
+    wchar_t   szFaceName[LF_FACESIZE]; /**< 字体名 */
+} TOOL_CF_T;
 
 /* -------------------------------------------------------------------------- */
 /*  模块内部全局变量                                                           */
@@ -130,11 +152,13 @@ static uint32_t  g_tool_rx_pending = 0u;                   /**< 数据到达待�
 static uint32_t  g_tool_hover_id = 0u;                     /**< 悬停按钮ID(0=无) */
 static uint32_t  g_tool_press_id = 0u;                     /**< 按下按钮ID(0=无) */
 static uint8_t   g_tool_mouse_tracking = 0u;               /**< 鼠标离开跟踪标志 */
-static uint32_t  g_tool_rx_text_len = 0u;                  /**< 接收区当前文本长度缓存 */
+static uint32_t  g_tool_rx_pos = 0u;                       /**< 接收区字符位置(RichEdit计量: CRLF=1) */
 static uint32_t  g_tool_rx_cap = (256u * 1024u);           /**< 接收区文本上限(宽字符, 菜单可配) */
 static uint32_t  g_tool_cache_kb = 256u;                   /**< 接收缓存档位(KB) */
-static uint8_t   g_tool_strip_dev = 1u;                    /**< 精简设备时间戳开关(1=剥除logcat -v time行首时间) */
+static uint8_t   g_tool_strip_dev = 1u;                    /**< 精简设备时间戳开关 */
 static wchar_t   g_tool_status_text[160] = {0};            /**< 状态栏首格文本 */
+static uint8_t   g_tool_use_rich = 0u;                     /**< 接收区为RichEdit标志 */
+static uint32_t  g_tool_color_tick_lines = 0u;             /**< 本拍已着色行数(洪峰降级) */
 
 static const uint32_t g_tool_cache_table[TOOL_DBG_CACHE_COUNT] =
 {
@@ -148,22 +172,26 @@ static RECT g_tool_btn_rects[TOOL_DBG_BTN_COUNT] = {0};    /**< 自绘按钮矩�
 
 static const uint32_t g_tool_btn_ids[TOOL_DBG_BTN_COUNT] =
 {
-    TOOL_DBG_IDC_BTN_CONNECT,
-    TOOL_DBG_IDC_BTN_DISCONNECT,
-    TOOL_DBG_IDC_BTN_CLEAR,
     TOOL_DBG_IDC_BTN_SEND
 };
 
 static const wchar_t *const g_tool_btn_labels[TOOL_DBG_BTN_COUNT] =
 {
-    L"连接…", L"断开", L"清空", L"发送"
+    L"发送"
 };
+
+/* 多彩关键字词表(行->逗号分隔词展开) */
+static wchar_t   g_color_kw_text[TOOL_DBG_COLOR_MAX][TOOL_DBG_COLOR_KW_WCHAR];
+static uint32_t  g_color_kw_color[TOOL_DBG_COLOR_MAX];
+static uint32_t  g_color_kw_count = 0u;
 
 /* -------------------------------------------------------------------------- */
 /*  内部私有函数: 前向声明                                                     */
 /* -------------------------------------------------------------------------- */
 static void tool_status_cb(uint32_t event, const wchar_t *p_msg, void *p_user);
 static void tool_on_send(HWND hwnd);
+static void tool_rx_apply_charcolor(HWND h_rx, uint32_t color);
+static void tool_rebuild_color_words(void);
 
 /* -------------------------------------------------------------------------- */
 /*  内部私有函数: 状态栏                                                       */
@@ -282,8 +310,6 @@ static void tool_create_menu(HWND hwnd)
     HMENU h_view = CreatePopupMenu();
     HMENU h_help = CreatePopupMenu();
 
-    (void)AppendMenuW(h_file, MF_STRING, (UINT_PTR)TOOL_DBG_MID_CLEAR, L"清空显示");
-    (void)AppendMenuW(h_file, MF_SEPARATOR, 0u, NULL);
     (void)AppendMenuW(h_file, MF_STRING, (UINT_PTR)TOOL_DBG_MID_SAVE_NOW, L"立即保存…");
     (void)AppendMenuW(h_file, MF_STRING, (UINT_PTR)TOOL_DBG_MID_AUTOSAVE, L"自动保存到文件");
     (void)AppendMenuW(h_file, MF_STRING, (UINT_PTR)TOOL_DBG_MID_SAVE_DIR, L"设置保存文件夹…");
@@ -297,8 +323,10 @@ static void tool_create_menu(HWND hwnd)
 
     (void)AppendMenuW(h_view, MF_STRING, (UINT_PTR)TOOL_DBG_MID_TS, L"时间戳");
     (void)AppendMenuW(h_view, MF_STRING, (UINT_PTR)TOOL_DBG_MID_PAUSE, L"暂停显示");
+    (void)AppendMenuW(h_view, MF_STRING, (UINT_PTR)TOOL_DBG_MID_CLEAR, L"清空显示");
     (void)AppendMenuW(h_view, MF_SEPARATOR, 0u, NULL);
     (void)AppendMenuW(h_view, MF_STRING, (UINT_PTR)TOOL_DBG_MID_FILTERWIN, L"过滤窗口");
+    (void)AppendMenuW(h_view, MF_STRING, (UINT_PTR)TOOL_DBG_MID_COLORWIN, L"多彩关键字…");
     (void)AppendMenuW(h_view, MF_STRING, (UINT_PTR)TOOL_DBG_MID_STRIPDEV, L"精简设备时间戳");
 
     /* 接收缓存子菜单(单选) */
@@ -347,6 +375,8 @@ static void tool_sync_menu_checks(HWND hwnd, HMENU h_menu)
                         MF_BYCOMMAND | ((pause_on != 0u) ? MF_CHECKED : MF_UNCHECKED));
     (void)CheckMenuItem(h_menu, (UINT)TOOL_DBG_MID_FILTERWIN,
                         MF_BYCOMMAND | ((filter_view_is_open() != 0u) ? MF_CHECKED : MF_UNCHECKED));
+    (void)CheckMenuItem(h_menu, (UINT)TOOL_DBG_MID_COLORWIN,
+                        MF_BYCOMMAND | ((color_view_is_open() != 0u) ? MF_CHECKED : MF_UNCHECKED));
     (void)CheckMenuItem(h_menu, (UINT)TOOL_DBG_MID_STRIPDEV,
                         MF_BYCOMMAND | ((g_tool_strip_dev != 0u) ? MF_CHECKED : MF_UNCHECKED));
     (void)CheckMenuItem(h_menu, (UINT)TOOL_DBG_MID_AUTOSAVE,
@@ -411,17 +441,114 @@ static HWND tool_create_child(HWND h_parent,
 }
 
 /**
+ * @brief   探测RichEdit组件(一次性)
+ * @return  1: 可用; 0: 不可用(接收区降级普通EDIT, 无着色)
+ */
+static uint8_t tool_ensure_richedit(void)
+{
+    static uint8_t s_probed = 0u;
+
+    if (s_probed == 0u) {
+        HMODULE h_lib = LoadLibraryW(TOOL_DBG_RICHED_DLL);
+
+        g_tool_use_rich = (h_lib != NULL) ? 1u : 0u;
+        s_probed = 1u;
+    }
+    return g_tool_use_rich;
+}
+
+/**
+ * @brief   从ini重建多彩关键字词表([Color]各行逗号分隔展开)
+ * @return  无
+ */
+static void tool_rebuild_color_words(void)
+{
+    uint32_t rows = 0u;
+    uint32_t r = 0u;
+
+    g_color_kw_count = 0u;
+    rows = dbg_conf_get_uint(L"Color", L"Rows", 0u);
+    if (rows > 12u) {
+        rows = 12u;
+    }
+    for (r = 0u; (r < rows) && (g_color_kw_count < TOOL_DBG_COLOR_MAX); r++) {
+        wchar_t row_text[128u];
+        wchar_t token[TOOL_DBG_COLOR_KW_WCHAR];
+        wchar_t keyname[8u];
+        uint32_t color = 0u;
+        uint32_t i = 0u;
+        uint32_t tok_pos = 0u;
+
+        memset(&row_text[0], 0, sizeof(row_text));
+        (void)wsprintfW(&keyname[0], L"Key%u", (unsigned int)(r + 1u));
+        dbg_conf_get_str(L"Color", &keyname[0], L"", &row_text[0], 128u);
+        (void)wsprintfW(&keyname[0], L"Color%u", (unsigned int)(r + 1u));
+        color = dbg_conf_get_uint(L"Color", &keyname[0], 0x00000000u);
+
+        for (i = 0u; (row_text[i] != L'\0'); i++) {
+            wchar_t ch = row_text[i];
+            uint8_t is_sep = ((ch == L',') || (ch == L'，') || (ch == L';') ||
+                              (ch == L'；') || (ch == L' ')) ? 1u : 0u;
+
+            if (is_sep != 0u) {
+                if (tok_pos > 0u) {
+                    token[tok_pos] = L'\0';
+                    if (g_color_kw_count < TOOL_DBG_COLOR_MAX) {
+                        lstrcpynW(&g_color_kw_text[g_color_kw_count][0], &token[0],
+                                  (int)TOOL_DBG_COLOR_KW_WCHAR);
+                        g_color_kw_color[g_color_kw_count] = color;
+                        g_color_kw_count++;
+                    }
+                    tok_pos = 0u;
+                    token[0] = L'\0';
+                }
+            } else if (tok_pos < (TOOL_DBG_COLOR_KW_WCHAR - 1u)) {
+                token[tok_pos] = ch;
+                tok_pos++;
+            } else {
+                /* 超长关键字截断 */
+            }
+        }
+        if (tok_pos > 0u) {
+            token[tok_pos] = L'\0';
+            if (g_color_kw_count < TOOL_DBG_COLOR_MAX) {
+                lstrcpynW(&g_color_kw_text[g_color_kw_count][0], &token[0],
+                          (int)TOOL_DBG_COLOR_KW_WCHAR);
+                g_color_kw_color[g_color_kw_count] = color;
+                g_color_kw_count++;
+            }
+        }
+    }
+}
+
+/**
+ * @brief   多彩关键字配置变更回调(配置窗口触发)
+ * @return  无
+ */
+static void tool_on_color_changed(void)
+{
+    tool_rebuild_color_words();
+}
+
+/**
  * @brief   创建主窗口内全部子控件(工作区+状态栏)
  * @param   hwnd 主窗口句柄
  * @return  无
  */
 static void tool_create_controls(HWND hwnd)
 {
-    /* 接收区(只读等宽) */
-    (void)tool_create_child(hwnd, L"EDIT", L"",
-                            (uint32_t)(ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL |
-                                       WS_VSCROLL | WS_BORDER),
-                            TOOL_DBG_IDC_ED_RX, UI_FONT_KIND_EDIT);
+    HWND h_rx = NULL;
+
+    /* 接收区: RichEdit(可着色)优先, 失败降级普通EDIT */
+    h_rx = tool_create_child(hwnd,
+                             (tool_ensure_richedit() != 0u) ? TOOL_DBG_RICHED_CLASS : L"EDIT",
+                             L"",
+                             (uint32_t)(ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL | WS_BORDER),
+                             TOOL_DBG_IDC_ED_RX, UI_FONT_KIND_EDIT);
+    if ((h_rx != NULL) && (g_tool_use_rich != 0u)) {
+        (void)SendMessageW(h_rx, EM_SETREADONLY, (WPARAM)TRUE, (LPARAM)0);
+    }
+
     /* 发送输入 */
     (void)tool_create_child(hwnd, L"EDIT", L"",
                             (uint32_t)(ES_MULTILINE | ES_AUTOHSCROLL | ES_AUTOVSCROLL |
@@ -450,6 +577,10 @@ static void tool_create_controls(HWND hwnd)
                        (WPARAM)(TOOL_DBG_TX_MAX_WCHAR - 1u), (LPARAM)0);
     dbg_save_init();
 
+    /* 多彩关键字词表与配置变更回调 */
+    tool_rebuild_color_words();
+    color_view_set_changed_fn(&tool_on_color_changed);
+
     /* 状态栏(comctl32, 6格) */
     g_tool_hstatus = CreateWindowExW(0u, STATUSCLASSNAMEW, NULL,
                                      (WS_CHILD | WS_VISIBLE),
@@ -458,7 +589,7 @@ static void tool_create_controls(HWND hwnd)
 
 /**
  * @brief   按客户区尺寸排布全部子控件并缓存自绘按钮矩形
- *          规格见 DESIGN.md 4.0/4.1: 工具栏行固定, 接收区弹性, 底部锚定栈
+ *          规格见 DESIGN.md 4.0/4.1: 接收区弹性主体, 底部锚定发送行+状态栏
  * @param   hwnd 主窗口句柄
  * @return  无
  */
@@ -480,50 +611,37 @@ static void tool_layout(HWND hwnd)
     tool_statusbar_resize(hwnd, cw);
     ch_usable = ch - tool_statusbar_height();
 
-    /* 工具栏行: [连接…][断开][清空] 左起 */
-    g_tool_btn_rects[0].left = (LONG)TOOL_DBG_MARGIN;
-    g_tool_btn_rects[0].top = (LONG)TOOL_DBG_ROW_TOOLBAR_Y;
-    g_tool_btn_rects[0].right = (LONG)(TOOL_DBG_MARGIN + TOOL_DBG_BTN_BAR_W);
-    g_tool_btn_rects[0].bottom = (LONG)(TOOL_DBG_ROW_TOOLBAR_Y + TOOL_DBG_BTN_BAR_H);
-    g_tool_btn_rects[1].left = (LONG)(TOOL_DBG_MARGIN + TOOL_DBG_BTN_BAR_W + TOOL_DBG_CTRL_GAP);
-    g_tool_btn_rects[1].top = (LONG)TOOL_DBG_ROW_TOOLBAR_Y;
-    g_tool_btn_rects[1].right = (LONG)(g_tool_btn_rects[1].left + TOOL_DBG_BTN_BAR_W);
-    g_tool_btn_rects[1].bottom = (LONG)(TOOL_DBG_ROW_TOOLBAR_Y + TOOL_DBG_BTN_BAR_H);
-    g_tool_btn_rects[2].left = (LONG)(TOOL_DBG_MARGIN + (TOOL_DBG_BTN_BAR_W + TOOL_DBG_CTRL_GAP) * 2u);
-    g_tool_btn_rects[2].top = (LONG)TOOL_DBG_ROW_TOOLBAR_Y;
-    g_tool_btn_rects[2].right = (LONG)(g_tool_btn_rects[2].left + TOOL_DBG_BTN_BAR_W);
-    g_tool_btn_rects[2].bottom = (LONG)(TOOL_DBG_ROW_TOOLBAR_Y + TOOL_DBG_BTN_BAR_H);
-
     /* 底部锚定栈(自下而上, 以状态栏上缘为基): 发送行 <- 接收区底 */
     tx_y = (ch_usable - TOOL_DBG_MARGIN - TOOL_DBG_TX_H);
     if (tx_y <= (TOOL_DBG_RX_Y + 60u)) {
         return;   /* 纵向空间不足, 保持上次布局 */
     }
 
-    /* 接收区(弹性) */
+    /* 接收区(弹性主体) */
     (void)MoveWindow(GetDlgItem(hwnd, (int)TOOL_DBG_IDC_ED_RX),
                      (int)TOOL_DBG_MARGIN, (int)TOOL_DBG_RX_Y,
                      (int)(cw - (TOOL_DBG_MARGIN * 2u)),
                      (int)(tx_y - TOOL_DBG_ROW_GAP - TOOL_DBG_RX_Y), TRUE);
 
     /* 发送行: [发送输入延伸][加回车][发送] 贴右 */
-    g_tool_btn_rects[3].right = (LONG)(cw - TOOL_DBG_MARGIN);
-    g_tool_btn_rects[3].top = (LONG)tx_y;
-    g_tool_btn_rects[3].left = (LONG)(cw - TOOL_DBG_MARGIN - TOOL_DBG_BTN_TX_W);
-    g_tool_btn_rects[3].bottom = (LONG)(tx_y + TOOL_DBG_BTN_TX_H);
+    g_tool_btn_rects[0].right = (LONG)(cw - TOOL_DBG_MARGIN);
+    g_tool_btn_rects[0].top = (LONG)tx_y;
+    g_tool_btn_rects[0].left = (LONG)(cw - TOOL_DBG_MARGIN - TOOL_DBG_BTN_TX_W);
+    g_tool_btn_rects[0].bottom = (LONG)(tx_y + TOOL_DBG_BTN_TX_H);
     (void)MoveWindow(GetDlgItem(hwnd, (int)TOOL_DBG_IDC_CK_APPEND),
-                     (int)(cw - TOOL_DBG_MARGIN - TOOL_DBG_BTN_TX_W - TOOL_DBG_CTRL_GAP - 100u),
-                     (int)(tx_y + 4u), (int)100u, (int)TOOL_DBG_CK_H, TRUE);
+                     (int)(cw - TOOL_DBG_MARGIN - TOOL_DBG_BTN_TX_W - TOOL_DBG_CTRL_GAP - TOOL_DBG_CK_W),
+                     (int)(tx_y + 4u), (int)TOOL_DBG_CK_W, (int)TOOL_DBG_CK_H, TRUE);
     (void)MoveWindow(GetDlgItem(hwnd, (int)TOOL_DBG_IDC_ED_TX),
                      (int)TOOL_DBG_MARGIN, (int)tx_y,
-                     (int)((uint32_t)g_tool_btn_rects[3].left - TOOL_DBG_CTRL_GAP - 110u - TOOL_DBG_MARGIN),
+                     (int)((uint32_t)g_tool_btn_rects[0].left - TOOL_DBG_CTRL_GAP -
+                           TOOL_DBG_CK_W - TOOL_DBG_CTRL_GAP - TOOL_DBG_MARGIN),
                      (int)TOOL_DBG_TX_H, TRUE);
 
     InvalidateRect(hwnd, NULL, FALSE);
 }
 
 /* -------------------------------------------------------------------------- */
-/*  内部私有函数: 自绘按钮                                                     */
+/*  内部私有函数: 自绘按钮(发送)                                               */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -533,33 +651,12 @@ static void tool_layout(HWND hwnd)
  */
 static uint8_t tool_btn_enabled(uint32_t index)
 {
-    uint8_t enable = 1u;
-
-    switch (index)
-    {
-        case 0u:   /* 连接: 未连接时可用 */
-        {
-            enable = (g_tool_connected == 0u) ? 1u : 0u;
-            break;
-        }
-        case 1u:   /* 断开: 已连接时可用 */
-        case 3u:   /* 发送: 已连接时可用 */
-        {
-            enable = (g_tool_connected != 0u) ? 1u : 0u;
-            break;
-        }
-        default:
-        {
-            enable = 1u;
-            break;
-        }
-    }
-
-    return enable;
+    (void)index;
+    return (g_tool_connected != 0u) ? 1u : 0u;   /* 发送: 已连接时可用 */
 }
 
 /**
- * @brief   绘制单个自绘按钮(主按钮主题色, 中性浅底, 禁用置灰)
+ * @brief   绘制单个自绘按钮(主题色主按钮, 禁用置灰)
  * @param   hdc   目标设备上下文
  * @param   index 按钮索引
  * @return  无
@@ -567,8 +664,6 @@ static uint8_t tool_btn_enabled(uint32_t index)
 static void tool_draw_button(HDC hdc, uint32_t index)
 {
     uint32_t ctrl_id = g_tool_btn_ids[index];
-    uint8_t primary = (((ctrl_id == TOOL_DBG_IDC_BTN_CONNECT) ||
-                        (ctrl_id == TOOL_DBG_IDC_BTN_DISCONNECT)) ? 1u : 0u);
     uint8_t hovered = ((g_tool_hover_id == ctrl_id) ? 1u : 0u);
     uint8_t pressed = ((g_tool_press_id == ctrl_id) ? 1u : 0u);
     uint8_t enabled = tool_btn_enabled(index);
@@ -582,7 +677,7 @@ static void tool_draw_button(HDC hdc, uint32_t index)
         fill_clr = TOOL_DBG_CLR_BTN_DISABLE;
         border_clr = TOOL_DBG_CLR_BTN_DISABLE;
         text_clr = TOOL_DBG_CLR_TEXT_DISABLE;
-    } else if (primary != 0u) {
+    } else {
         if (pressed != 0u) {
             fill_clr = TOOL_DBG_CLR_ACCENT_PRESS;
         } else if (hovered != 0u) {
@@ -592,23 +687,12 @@ static void tool_draw_button(HDC hdc, uint32_t index)
         }
         border_clr = fill_clr;
         text_clr = TOOL_DBG_CLR_TEXT_LIGHT;
-    } else {
-        if (pressed != 0u) {
-            fill_clr = TOOL_DBG_CLR_BTN_NEUTRAL_PR;
-        } else if (hovered != 0u) {
-            fill_clr = TOOL_DBG_CLR_BTN_NEUTRAL_HV;
-        } else {
-            fill_clr = TOOL_DBG_CLR_BTN_NEUTRAL_BG;
-        }
-        border_clr = TOOL_DBG_CLR_BTN_BORDER;
-        text_clr = TOOL_DBG_CLR_TEXT_DARK;
     }
 
     SetBkMode(hdc, TRANSPARENT);
     ui_common_fill_round_rect(hdc, &rc, 8u, fill_clr, border_clr, 1u);
 
-    /* 文字内缩后按不透明模式绘制(启用真ClearType, 修复中文发虚);
-       内缩量大于圆角半径, 避免不透明背景盖掉圆角 */
+    /* 文字内缩后按不透明模式绘制(启用真ClearType); 内缩量大于圆角半径 */
     InflateRect(&rc, -9, -7);
     h_font_old = (HFONT)SelectObject(hdc, ui_common_get_font(UI_FONT_KIND_BTN));
     SetTextColor(hdc, (COLORREF)text_clr);
@@ -658,40 +742,254 @@ static void tool_invalidate_btn(HWND hwnd, uint32_t ctrl_id)
 }
 
 /* -------------------------------------------------------------------------- */
-/*  内部私有函数: 接收管线                                                     */
+/*  内部私有函数: 接收管线(RichEdit着色)                                       */
 /* -------------------------------------------------------------------------- */
 
 /**
- * @brief   追加文本到接收区(超限裁头, 暂停显示时不追加)
+ * @brief   设置接收区插入点字符颜色(RichEdit; 须在解锁只读期间调用)
+ * @param   h_rx   接收区句柄
+ * @param   color  文字色(0x00BBGGRR)
+ * @return  无
+ */
+static void tool_rx_apply_charcolor(HWND h_rx, uint32_t color)
+{
+    TOOL_CF_T cf;
+
+    memset(&cf, 0, sizeof(cf));
+    cf.cbSize = (UINT)sizeof(cf);
+    cf.dwMask = TOOL_DBG_CFM_COLOR;
+    cf.dwEffects = 0u;   /* 清除CFE_AUTOCOLOR, 启用crTextColor */
+    cf.crTextColor = (COLORREF)color;
+    (void)SendMessageW(h_rx, TOOL_DBG_EM_SETCHARFORMAT,
+                       (WPARAM)TOOL_DBG_SCF_SELECTION, (LPARAM)&cf);
+}
+
+/**
+ * @brief   接收区超限裁头(RichEdit计量)
+ * @param   h_rx 接收区句柄
+ * @return  无
+ */
+static void tool_rx_trim(HWND h_rx)
+{
+    if (g_tool_rx_pos <= g_tool_rx_cap) {
+        return;
+    }
+    {
+        uint32_t del_chars = g_tool_rx_pos / 2u;
+
+        (void)SendMessageW(h_rx, EM_SETREADONLY, (WPARAM)FALSE, (LPARAM)0);
+        (void)SendMessageW(h_rx, EM_SETSEL, 0, (LPARAM)del_chars);
+        (void)SendMessageW(h_rx, EM_REPLACESEL, FALSE, (LPARAM)L"");
+        (void)SendMessageW(h_rx, EM_SETREADONLY, (WPARAM)TRUE, (LPARAM)0);
+        g_tool_rx_pos -= del_chars;
+    }
+}
+
+/**
+ * @brief   追加纯文本到接收区(默认黑色; TX回显/降级路径)
  * @param   hwnd   主窗口句柄
- * @param   p_text 待追加文本(CRLF分隔的行)
+ * @param   p_text 待追加文本(可含CRLF; RichEdit把\r\n记为1字符)
  * @return  无
  */
 static void tool_append_rx(HWND hwnd, const wchar_t *p_text)
 {
     HWND h_rx = NULL;
     uint32_t len = 0u;
+    uint32_t crlf = 0u;
+    const wchar_t *p = p_text;
 
     if (SendMessageW(GetDlgItem(hwnd, (int)TOOL_DBG_IDC_CK_PAUSE),
                      BM_GETCHECK, 0u, 0u) == BST_CHECKED) {
         return;
     }
-
     h_rx = GetDlgItem(hwnd, (int)TOOL_DBG_IDC_ED_RX);
-    if (g_tool_rx_text_len > g_tool_rx_cap) {
-        (void)SendMessageW(h_rx, EM_SETSEL, 0, (LPARAM)(g_tool_rx_text_len / 2u));
-        (void)SendMessageW(h_rx, EM_REPLACESEL, FALSE, (LPARAM)L"");
+
+    if (g_tool_use_rich != 0u) {
+        (void)SendMessageW(h_rx, EM_SETREADONLY, (WPARAM)FALSE, (LPARAM)0);
+        tool_rx_trim(h_rx);
+        (void)SendMessageW(h_rx, EM_SETSEL, (WPARAM)g_tool_rx_pos, (LPARAM)g_tool_rx_pos);
+        tool_rx_apply_charcolor(h_rx, 0x00000000u);
+        (void)SendMessageW(h_rx, EM_REPLACESEL, FALSE, (LPARAM)p_text);
+        (void)SendMessageW(h_rx, EM_SETREADONLY, (WPARAM)TRUE, (LPARAM)0);
+        len = (uint32_t)lstrlenW(p_text);
+        for (; *p != L'\0'; p++) {
+            if ((*p == L'\r') && (*(p + 1) == L'\n')) {
+                crlf++;
+                p++;
+            }
+        }
+        g_tool_rx_pos += len - crlf;
+    } else {
+        uint32_t cur = 0u;
+
+        if (SendMessageW(h_rx, WM_GETTEXTLENGTH, 0u, 0u) > g_tool_rx_cap) {
+            (void)SendMessageW(h_rx, EM_SETSEL, 0,
+                               (LPARAM)((uint32_t)SendMessageW(h_rx, WM_GETTEXTLENGTH, 0u, 0u) / 2u));
+            (void)SendMessageW(h_rx, EM_REPLACESEL, FALSE, (LPARAM)L"");
+        }
+        cur = (uint32_t)SendMessageW(h_rx, WM_GETTEXTLENGTH, 0u, 0u);
+        (void)SendMessageW(h_rx, EM_SETSEL, (WPARAM)cur, (LPARAM)cur);
+        (void)SendMessageW(h_rx, EM_REPLACESEL, FALSE, (LPARAM)p_text);
     }
-    len = (uint32_t)GetWindowTextLengthW(h_rx);
-    (void)SendMessageW(h_rx, EM_SETSEL, (WPARAM)len, (LPARAM)len);
-    (void)SendMessageW(h_rx, EM_REPLACESEL, FALSE, (LPARAM)p_text);
-    g_tool_rx_text_len = (uint32_t)GetWindowTextLengthW(h_rx);
-    (void)SendMessageW(h_rx, EM_SCROLLCARET, 0u, 0u);
+    (void)SendMessageW(h_rx, WM_VSCROLL, (WPARAM)SB_BOTTOM, (LPARAM)0);
 }
 
 /**
- * @brief   单行落地: 主窗口全量追加(强制CRLF行尾, 修复行黏连);
- *          过滤窗口打开时, 命中行(附组号标记)同步追加到过滤窗口
+ * @brief   大小写不敏感宽字符子串查找(自指定位置起)
+ * @param   p_line 行文本
+ * @param   p_kw   关键字
+ * @param   from   起始索引
+ * @return  命中索引; 未命中返回-1
+ */
+static int32_t tool_find_ci(const wchar_t *p_line, const wchar_t *p_kw, uint32_t from)
+{
+    uint32_t line_len = (uint32_t)lstrlenW(p_line);
+    uint32_t kw_len = (uint32_t)lstrlenW(p_kw);
+    uint32_t i = from;
+    uint32_t j = 0u;
+
+    if ((kw_len == 0u) || (kw_len > line_len)) {
+        return -1;
+    }
+    for (i = from; (i + kw_len) <= line_len; i++) {
+        uint8_t match = 1u;
+
+        for (j = 0u; j < kw_len; j++) {
+            wchar_t a = p_line[i + j];
+            wchar_t b = p_kw[j];
+
+            if ((a >= L'A') && (a <= L'Z')) {
+                a = (wchar_t)(a + (L'a' - L'A'));
+            }
+            if ((b >= L'A') && (b <= L'Z')) {
+                b = (wchar_t)(b + (L'a' - L'A'));
+            }
+            if (a != b) {
+                match = 0u;
+                break;
+            }
+        }
+        if (match != 0u) {
+            return (int32_t)i;
+        }
+    }
+
+    return -1;
+}
+
+/**
+ * @brief   按多彩关键字着色追加一行到接收区(未命中部分黑色)
+ *          洪峰/超长行/片段超限自动降级为纯文本追加
+ * @param   hwnd   主窗口句柄
+ * @param   p_line 行文本(不含行尾)
+ * @return  无
+ */
+static void tool_append_rx_colored(HWND hwnd, const wchar_t *p_line)
+{
+    HWND h_rx = GetDlgItem(hwnd, (int)TOOL_DBG_IDC_ED_RX);
+    uint32_t line_len = (uint32_t)lstrlenW(p_line);
+    uint32_t seg_start[TOOL_DBG_COLOR_SEG_MAX];
+    uint32_t seg_len[TOOL_DBG_COLOR_SEG_MAX];
+    uint32_t seg_color[TOOL_DBG_COLOR_SEG_MAX];
+    uint32_t seg_count = 0u;
+    uint32_t k = 0u;
+    uint32_t i = 0u;
+
+    if ((g_color_kw_count == 0u) || (g_tool_use_rich == 0u) ||
+        (line_len == 0u) ||
+        (g_tool_color_tick_lines >= TOOL_DBG_COLOR_LINE_LIMIT)) {
+        wchar_t plain[TOOL_DBG_LINE_BUF_WCHAR + 4u];
+
+        memset(&plain[0], 0, sizeof(plain));
+        (void)lstrcpynW(&plain[0], p_line, (int)(TOOL_DBG_LINE_BUF_WCHAR + 2u));
+        (void)lstrcatW(&plain[0], L"\r\n");
+        tool_append_rx(hwnd, &plain[0]);
+        return;
+    }
+
+    /* 收集不重叠命中片段(按起始位置贪心, 行序靠前的关键字优先) */
+    {
+        uint32_t scan = 0u;
+
+        while ((scan < line_len) && (seg_count < TOOL_DBG_COLOR_SEG_MAX)) {
+            int32_t best = -1;
+            uint32_t best_len = 0u;
+            uint32_t best_color = 0u;
+
+            for (k = 0u; k < g_color_kw_count; k++) {
+                uint32_t kw_len = (uint32_t)lstrlenW(&g_color_kw_text[k][0]);
+                int32_t hit = -1;
+
+                if (kw_len == 0u) {
+                    continue;
+                }
+                hit = tool_find_ci(&p_line[scan], &g_color_kw_text[k][0], 0u);
+                if (hit < 0) {
+                    continue;
+                }
+                if ((best < 0) || (((uint32_t)hit) < (uint32_t)best)) {
+                    best = hit;
+                    best_len = kw_len;
+                    best_color = g_color_kw_color[k];
+                }
+            }
+            if (best < 0) {
+                break;
+            }
+            seg_start[seg_count] = scan + (uint32_t)best;
+            seg_len[seg_count] = best_len;
+            seg_color[seg_count] = best_color;
+            seg_count++;
+            scan = scan + (uint32_t)best + best_len;
+        }
+    }
+
+    /* 分段追加: 未命中段黑色, 命中段按词色; 行尾CRLF黑色 */
+    (void)SendMessageW(h_rx, EM_SETREADONLY, (WPARAM)FALSE, (LPARAM)0);
+    tool_rx_trim(h_rx);
+    {
+        wchar_t piece[TOOL_DBG_LINE_BUF_WCHAR + 4u];
+        uint32_t cursor = 0u;
+
+        for (i = 0u; i <= seg_count; i++) {
+            uint32_t from = (i < seg_count) ? seg_start[i] : line_len;
+            uint32_t gap = from - cursor;
+
+            if (gap > 0u) {
+                memset(&piece[0], 0, sizeof(piece));
+                for (k = 0u; k < gap; k++) {
+                    piece[k] = p_line[cursor + k];
+                }
+                piece[gap] = L'\0';
+                (void)SendMessageW(h_rx, EM_SETSEL, (WPARAM)g_tool_rx_pos, (LPARAM)g_tool_rx_pos);
+                tool_rx_apply_charcolor(h_rx, 0x00000000u);
+                (void)SendMessageW(h_rx, EM_REPLACESEL, FALSE, (LPARAM)&piece[0]);
+                g_tool_rx_pos += gap;
+            }
+            if (i < seg_count) {
+                memset(&piece[0], 0, sizeof(piece));
+                for (k = 0u; k < seg_len[i]; k++) {
+                    piece[k] = p_line[seg_start[i] + k];
+                }
+                piece[seg_len[i]] = L'\0';
+                (void)SendMessageW(h_rx, EM_SETSEL, (WPARAM)g_tool_rx_pos, (LPARAM)g_tool_rx_pos);
+                tool_rx_apply_charcolor(h_rx, seg_color[i]);
+                (void)SendMessageW(h_rx, EM_REPLACESEL, FALSE, (LPARAM)&piece[0]);
+                g_tool_rx_pos += seg_len[i];
+                cursor = seg_start[i] + seg_len[i];
+            }
+        }
+        (void)SendMessageW(h_rx, EM_SETSEL, (WPARAM)g_tool_rx_pos, (LPARAM)g_tool_rx_pos);
+        tool_rx_apply_charcolor(h_rx, 0x00000000u);
+        (void)SendMessageW(h_rx, EM_REPLACESEL, FALSE, (LPARAM)L"\r\n");
+        g_tool_rx_pos += 1u;   /* 段落符记1字符 */
+    }
+    (void)SendMessageW(h_rx, EM_SETREADONLY, (WPARAM)TRUE, (LPARAM)0);
+    g_tool_color_tick_lines++;
+}
+
+/**
+ * @brief   单行落地: 主窗口追加(可着色); 过滤窗口打开时命中行同步
  * @param   hwnd   主窗口句柄
  * @param   p_line 行文本(不含行尾)
  * @return  无
@@ -700,14 +998,13 @@ static void tool_handle_line(HWND hwnd, const wchar_t *p_line)
 {
     uint32_t group_idx = 0u;
     uint32_t ret = 0u;
-    wchar_t line_buf[TOOL_DBG_LINE_BUF_WCHAR + 8u];
 
-    memset(&line_buf[0], 0, sizeof(line_buf));
+    if (SendMessageW(GetDlgItem(hwnd, (int)TOOL_DBG_IDC_CK_PAUSE),
+                     BM_GETCHECK, 0u, 0u) == BST_CHECKED) {
+        return;   /* 暂停显示: 主窗与过滤窗都不追加(管线与保存照常) */
+    }
 
-    /* 主窗口: 全量日志, 行尾强制CRLF */
-    (void)lstrcpynW(&line_buf[0], p_line, (int)TOOL_DBG_LINE_BUF_WCHAR);
-    (void)lstrcatW(&line_buf[0], L"\r\n");
-    tool_append_rx(hwnd, &line_buf[0]);
+    tool_append_rx_colored(hwnd, p_line);
 
     /* 过滤窗口: 命中行(>>K行号标记, 行内关键字按行色高亮), 不与全量日志混排 */
     ret = dbg_filter_match(p_line, &group_idx);
@@ -717,7 +1014,7 @@ static void tool_handle_line(HWND hwnd, const wchar_t *p_line)
 }
 
 /**
- * @brief   将装配输出按行切分并逐行过滤追加
+ * @brief   将装配输出按行切分并逐行落地
  * @param   hwnd   主窗口句柄
  * @param   p_text 装配输出文本(行以CRLF结尾)
  * @return  无
@@ -749,7 +1046,8 @@ static void tool_split_and_handle(HWND hwnd, const wchar_t *p_text)
 }
 
 /**
- * @brief   处理接收: 取走环形缓冲 -> 行装配 -> 过滤 -> 显示
+ * @brief   处理接收: 取走环形缓冲 -> 行装配 -> 着色/过滤 -> 显示
+ *          (RichEdit整个节拍关重绘一次, 洪峰保UI响应)
  * @param   hwnd 主窗口句柄
  * @return  无
  */
@@ -758,6 +1056,7 @@ static void tool_process_rx(HWND hwnd)
     uint8_t  bytes[4096u];
     wchar_t  out[DBG_FRAME_OUT_MAX];
     DBG_FRAME_OPT_T opt;
+    HWND h_rx = GetDlgItem(hwnd, (int)TOOL_DBG_IDC_ED_RX);
     uint32_t pos = 0u;
     uint32_t got = 0u;
     uint32_t pass = 0u;
@@ -768,13 +1067,19 @@ static void tool_process_rx(HWND hwnd)
     memset(&opt, 0, sizeof(opt));
     opt.ts_enable = (SendMessageW(GetDlgItem(hwnd, (int)TOOL_DBG_IDC_CK_TS),
                                   BM_GETCHECK, 0u, 0u) == BST_CHECKED) ? 1u : 0u;
-    opt.p_dir_tag = NULL;   /* RX行不带方向标记, 缩短行首; TX回显自带[TX] */
+    opt.p_dir_tag = NULL;   /* RX行不带方向标记; TX回显自带[TX] */
     opt.enc = (uint32_t)DBG_FRAME_ENC_UTF8;
     opt.strip_dev_ts = g_tool_strip_dev;
 
-    /* 批量事务: 过滤窗口整个节拍只解锁/重绘一次(洪峰保UI响应) */
+    g_tool_color_tick_lines = 0u;
+
+    /* 批量事务: 过滤窗口整个节拍只解锁/重绘一次 */
     if (filter_view_is_open() != 0u) {
         filter_view_begin_batch();
+    }
+    /* 主窗RichEdit整拍关重绘(着色重排一次完成) */
+    if (g_tool_use_rich != 0u) {
+        (void)SendMessageW(h_rx, WM_SETREDRAW, (WPARAM)FALSE, (LPARAM)0);
     }
 
     for (pass = 0u; pass < 8u; pass++) {
@@ -801,13 +1106,17 @@ static void tool_process_rx(HWND hwnd)
     if (filter_view_is_open() != 0u) {
         filter_view_end_batch();
     }
+    if (g_tool_use_rich != 0u) {
+        (void)SendMessageW(h_rx, WM_SETREDRAW, (WPARAM)TRUE, (LPARAM)0);
+        (void)InvalidateRect(h_rx, NULL, FALSE);
+        (void)SendMessageW(h_rx, WM_VSCROLL, (WPARAM)SB_BOTTOM, (LPARAM)0);
+    }
 
     overflow = dbg_source_rx_take_overflow(&g_tool_rx);
     if (overflow != 0u) {
-        tool_set_status( L"警告: 接收缓冲溢出, 已丢弃部分数据");
+        tool_set_status(L"警告: 接收缓冲溢出, 已丢弃部分数据");
     }
 }
-
 
 /* -------------------------------------------------------------------------- */
 /*  内部私有函数: 动作                                                         */
@@ -847,7 +1156,7 @@ static void tool_on_status(HWND hwnd, uint32_t event)
             g_tool_connected = 1u;
             g_tool_relogining = 0u;
             InvalidateRect(hwnd, NULL, FALSE);
-            tool_set_status( L"已连接 adb shell");
+            tool_set_status(L"已连接 adb shell");
             break;
         }
         case DBG_SOURCE_EVT_CLOSED:
@@ -856,26 +1165,25 @@ static void tool_on_status(HWND hwnd, uint32_t event)
                 g_tool_connected = 0u;
                 g_tool_relogining = 0u;
                 InvalidateRect(hwnd, NULL, FALSE);
-                tool_set_status( L"连接已断开");
+                tool_set_status(L"连接已断开");
             }
             break;
         }
         case DBG_SOURCE_EVT_RELOGIN:
         {
-            /* 异常断开且已配置自动重登: 保持占用态, 可随时[断开]取消 */
+            /* 异常断开且已配置自动重登: 保持占用态, 可随时断开取消 */
             g_tool_relogining = 1u;
             InvalidateRect(hwnd, NULL, FALSE);
-            tool_set_status( L"连接断开, 自动重登中…(可点[断开]取消)");
+            tool_set_status(L"连接断开, 自动重登中…(可点菜单 连接→断开连接 取消)");
             break;
         }
         case DBG_SOURCE_EVT_ERROR:
         {
             adb_core_get_last_error(&err[0], DBG_SOURCE_STATUS_LEN);
             if (g_tool_relogining == 0u) {
-                tool_set_status( &err[0]);
+                tool_set_status(&err[0]);
             } else {
-                /* 重登期间错误不覆盖重登提示 */
-                tool_set_status( L"重登尝试失败, 按间隔继续重试…");
+                tool_set_status(L"重登尝试失败, 按间隔继续重试…");
             }
             break;
         }
@@ -888,7 +1196,7 @@ static void tool_on_status(HWND hwnd, uint32_t event)
 }
 
 /**
- * @brief   打开ADB连接对话框(菜单"ADB连接…"/工具栏[连接…])
+ * @brief   打开ADB连接对话框(菜单 连接→ADB连接…)
  * @param   hwnd 主窗口句柄
  * @return  无
  */
@@ -908,7 +1216,7 @@ static void tool_on_connect_dlg(HWND hwnd)
 }
 
 /**
- * @brief   断开连接(菜单/工具栏)
+ * @brief   断开连接(菜单)
  * @param   hwnd 主窗口句柄
  * @return  无
  */
@@ -923,18 +1231,26 @@ static void tool_on_disconnect(HWND hwnd)
 }
 
 /**
- * @brief   清空显示与计数(菜单/工具栏)
+ * @brief   清空显示与计数(视图菜单)
  * @param   hwnd 主窗口句柄
  * @return  无
  */
 static void tool_on_clear(HWND hwnd)
 {
-    SetWindowTextW(GetDlgItem(hwnd, (int)TOOL_DBG_IDC_ED_RX), L"");
-    g_tool_rx_text_len = 0u;
+    HWND h_rx = GetDlgItem(hwnd, (int)TOOL_DBG_IDC_ED_RX);
+
+    if (g_tool_use_rich != 0u) {
+        (void)SendMessageW(h_rx, EM_SETREADONLY, (WPARAM)FALSE, (LPARAM)0);
+        SetWindowTextW(h_rx, L"");
+        (void)SendMessageW(h_rx, EM_SETREADONLY, (WPARAM)TRUE, (LPARAM)0);
+    } else {
+        SetWindowTextW(h_rx, L"");
+    }
+    g_tool_rx_pos = 0u;
     g_tool_rx_bytes = 0u;
     g_tool_tx_bytes = 0u;
     tool_update_statusbar();
-    tool_set_status( L"已清空");
+    tool_set_status(L"已清空");
 }
 
 /**
@@ -953,7 +1269,7 @@ static void tool_on_send(HWND hwnd)
     uint32_t len = 0u;
 
     if (g_tool_connected == 0u) {
-        tool_set_status( L"未连接, 无法发送");
+        tool_set_status(L"未连接, 无法发送");
         return;
     }
 
@@ -964,14 +1280,14 @@ static void tool_on_send(HWND hwnd)
 
     if (GetWindowTextW(GetDlgItem(hwnd, (int)TOOL_DBG_IDC_ED_TX),
                        &text[0], (int32_t)TOOL_DBG_TX_MAX_WCHAR) == 0) {
-        tool_set_status( L"提示: 发送内容为空");
+        tool_set_status(L"提示: 发送内容为空");
         return;
     }
 
     conv_len = WideCharToMultiByte(CP_UTF8, 0u, &text[0], -1,
                                    (char *)&utf8[0], (int32_t)TOOL_DBG_TX_UTF8_MAX, NULL, NULL);
     if (conv_len <= 0) {
-        tool_set_status( L"错误: 发送编码失败");
+        tool_set_status(L"错误: 发送编码失败");
         return;
     }
     len = (uint32_t)conv_len;   /* 含终结符 */
@@ -987,7 +1303,7 @@ static void tool_on_send(HWND hwnd)
         return;
     }
     if (p_src->pfn_write(&utf8[0], len) != 0) {
-        tool_set_status( L"错误: 发送失败(连接可能已断开)");
+        tool_set_status(L"错误: 发送失败(连接可能已断开)");
         return;
     }
     g_tool_tx_bytes += len;
@@ -1019,7 +1335,7 @@ static void tool_on_save_now(HWND hwnd)
         tool_set_status(L"提示: 接收区为空, 无可保存内容");
         return;
     }
-    p_buf = (wchar_t *)HeapAlloc(GetProcessHeap(), 0u, ((SIZE_T)len + 1u) * sizeof(wchar_t));
+    p_buf = (wchar_t *)HeapAlloc(GetProcessHeap(), 0u, ((SIZE_T)len + 2u) * sizeof(wchar_t));
     if (p_buf == NULL) {
         tool_set_status(L"错误: 内存不足");
         return;
@@ -1078,32 +1394,8 @@ static void tool_on_about(HWND hwnd)
  */
 static void tool_on_button(HWND hwnd, uint32_t ctrl_id)
 {
-    switch (ctrl_id)
-    {
-        case TOOL_DBG_IDC_BTN_CONNECT:
-        {
-            tool_on_connect_dlg(hwnd);
-            break;
-        }
-        case TOOL_DBG_IDC_BTN_DISCONNECT:
-        {
-            tool_on_disconnect(hwnd);
-            break;
-        }
-        case TOOL_DBG_IDC_BTN_CLEAR:
-        {
-            tool_on_clear(hwnd);
-            break;
-        }
-        case TOOL_DBG_IDC_BTN_SEND:
-        {
-            tool_on_send(hwnd);
-            break;
-        }
-        default:
-        {
-            break;
-        }
+    if (ctrl_id == TOOL_DBG_IDC_BTN_SEND) {
+        tool_on_send(hwnd);
     }
 }
 
@@ -1132,7 +1424,7 @@ static LRESULT CALLBACK tool_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             tool_create_controls(hwnd);
             tool_layout(hwnd);
             (void)SetTimer(hwnd, TOOL_DBG_TIMER_RX, TOOL_DBG_TIMER_RX_MS, NULL);
-            tool_set_status( L"就绪: [连接…] 打开ADB连接配置");
+            tool_set_status(L"就绪: 菜单 连接 → ADB 连接…");
             tool_update_statusbar();
             return 0;
         }
@@ -1226,6 +1518,15 @@ static LRESULT CALLBACK tool_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                         tool_update_statusbar();
                         break;
                     }
+                    case TOOL_DBG_MID_COLORWIN:
+                    {
+                        if (color_view_is_open() != 0u) {
+                            color_view_close();
+                        } else {
+                            color_view_open(g_tool_instance, hwnd);
+                        }
+                        break;
+                    }
                     case TOOL_DBG_MID_STRIPDEV:
                     {
                         g_tool_strip_dev = (g_tool_strip_dev != 0u) ? 0u : 1u;
@@ -1282,7 +1583,7 @@ static LRESULT CALLBACK tool_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 return 0;
             }
 
-            /* 控件通知: 主窗口无过滤控件, 其余不处理 */
+            /* 控件通知: 其余不处理 */
             return 0;
         }
         case WM_PAINT:
@@ -1376,7 +1677,9 @@ static LRESULT CALLBACK tool_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             const DBG_SOURCE_T *p_src = dbg_source_get((uint32_t)DBG_SRC_ADB);
 
             (void)KillTimer(hwnd, TOOL_DBG_TIMER_RX);
+            color_view_close();
             filter_view_close();
+            color_view_set_changed_fn(NULL);
             dbg_save_shutdown();
             if ((p_src != NULL) && (g_tool_connected != 0u)) {
                 p_src->pfn_close();

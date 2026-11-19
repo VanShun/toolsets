@@ -37,6 +37,7 @@ if exist res\app_res.o set RES_ARG=res\app_res.o
     tool_dbgterm.c ^
     adb_dlg.c ^
     filter_view.c ^
+    color_view.c ^
     dbg_save.c ^
     dbg_conf.c ^
     adb_core.c ^

@@ -40,6 +40,7 @@ rem --- To add a tool: append its module sources to the list below ---
     tools\dbgterm\tool_dbgterm.c ^
     tools\dbgterm\adb_dlg.c ^
     tools\dbgterm\filter_view.c ^
+    tools\dbgterm\color_view.c ^
     tools\dbgterm\dbg_save.c ^
     tools\dbgterm\dbg_conf.c ^
     tools\dbgterm\adb_core.c ^
