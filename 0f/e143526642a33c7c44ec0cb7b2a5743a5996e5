@@ -1,0 +1,31 @@
+version.h
+  s_6ec8c668b5ee1e::t_c6881e35d42b01 17-18,21-22
+tools/dbgterm/color_view.h
+  s_6ec8c668b5ee1e::t_ebdb309f2994fd 1-49
+tools/dbgterm/color_view.c
+  s_6ec8c668b5ee1e::t_a26b63edc51fcf 1-450
+CHANGELOG.md
+  s_6ec8c668b5ee1e::t_b327b5e614cf2c 5-19
+tools/dbgterm/tool_dbgterm.c
+  s_6ec8c668b5ee1e::t_211c8b344fad7d 1-1743
+tools/dbgterm/build.bat
+  s_6ec8c668b5ee1e::t_c76b2a5b13662d 40
+build.bat
+  s_6ec8c668b5ee1e::t_07e853593f2a11 43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0fe143526642a33c7c44ec0cb7b2a5743a5996e5",
+  "prompts": {},
+  "sessions": {
+    "s_6ec8c668b5ee1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4634b95e-8dd0-451c-9050-4e05c2830dcb",
+        "model": "glm-5.3"
+      },
+      "human_author": "herongshun <herongshun@yaxon.com>"
+    }
+  }
+}
