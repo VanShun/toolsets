@@ -30,9 +30,7 @@
 /* -------------------------------------------------------------------------- */
 #define TOOL_DBG_IDC_ED_RX         2010u  /**< 接收区(RichEdit/EDIT只读) */
 #define TOOL_DBG_IDC_ED_TX         2011u  /**< 发送输入框 */
-#define TOOL_DBG_IDC_CK_TS         2013u  /**< 时间戳开关 */
-#define TOOL_DBG_IDC_CK_PAUSE      2014u  /**< 暂停显示开关 */
-#define TOOL_DBG_IDC_CK_APPEND     2015u  /**< 发送追加回车开关 */
+#define TOOL_DBG_IDC_CK_APPEND     2015u  /**< 发送追加回车开关(发送行内) */
 
 /* 自绘按钮逻辑ID */
 #define TOOL_DBG_IDC_BTN_SEND      2104u  /**< 发送 */
@@ -156,6 +154,8 @@ static uint32_t  g_tool_rx_pos = 0u;                       /**< 接收区字符�
 static uint32_t  g_tool_rx_cap = (256u * 1024u);           /**< 接收区文本上限(宽字符, 菜单可配) */
 static uint32_t  g_tool_cache_kb = 256u;                   /**< 接收缓存档位(KB) */
 static uint8_t   g_tool_strip_dev = 1u;                    /**< 精简设备时间戳开关 */
+static uint8_t   g_tool_ts_on = 1u;                        /**< 时间戳开关(视图菜单, 缺省开) */
+static uint8_t   g_tool_pause_on = 0u;                     /**< 暂停显示开关(视图菜单, 缺省关) */
 static wchar_t   g_tool_status_text[160] = {0};            /**< 状态栏首格文本 */
 static uint8_t   g_tool_use_rich = 0u;                     /**< 接收区为RichEdit标志 */
 static uint32_t  g_tool_color_tick_lines = 0u;             /**< 本拍已着色行数(洪峰降级) */
@@ -364,15 +364,11 @@ static void tool_create_menu(HWND hwnd)
  */
 static void tool_sync_menu_checks(HWND hwnd, HMENU h_menu)
 {
-    uint8_t ts_on = (SendMessageW(GetDlgItem(hwnd, (int)TOOL_DBG_IDC_CK_TS),
-                                  BM_GETCHECK, 0u, 0u) == BST_CHECKED) ? 1u : 0u;
-    uint8_t pause_on = (SendMessageW(GetDlgItem(hwnd, (int)TOOL_DBG_IDC_CK_PAUSE),
-                                     BM_GETCHECK, 0u, 0u) == BST_CHECKED) ? 1u : 0u;
-
+    (void)hwnd;
     (void)CheckMenuItem(h_menu, (UINT)TOOL_DBG_MID_TS,
-                        MF_BYCOMMAND | ((ts_on != 0u) ? MF_CHECKED : MF_UNCHECKED));
+                        MF_BYCOMMAND | ((g_tool_ts_on != 0u) ? MF_CHECKED : MF_UNCHECKED));
     (void)CheckMenuItem(h_menu, (UINT)TOOL_DBG_MID_PAUSE,
-                        MF_BYCOMMAND | ((pause_on != 0u) ? MF_CHECKED : MF_UNCHECKED));
+                        MF_BYCOMMAND | ((g_tool_pause_on != 0u) ? MF_CHECKED : MF_UNCHECKED));
     (void)CheckMenuItem(h_menu, (UINT)TOOL_DBG_MID_FILTERWIN,
                         MF_BYCOMMAND | ((filter_view_is_open() != 0u) ? MF_CHECKED : MF_UNCHECKED));
     (void)CheckMenuItem(h_menu, (UINT)TOOL_DBG_MID_COLORWIN,
@@ -390,22 +386,6 @@ static void tool_sync_menu_checks(HWND hwnd, HMENU h_menu)
                                                     ? MF_CHECKED : MF_UNCHECKED));
         }
     }
-}
-
-/**
- * @brief   切换复选框勾选态
- * @param   hwnd 主窗口句柄
- * @param   id   复选框控件ID
- * @return  切换后的状态: 1=勾选; 0=取消
- */
-static uint8_t tool_toggle_check(HWND hwnd, uint32_t id)
-{
-    LRESULT cur = SendMessageW(GetDlgItem(hwnd, (int)id), BM_GETCHECK, 0u, 0u);
-    uint8_t next = (cur == BST_CHECKED) ? 0u : 1u;
-
-    (void)SendMessageW(GetDlgItem(hwnd, (int)id), BM_SETCHECK,
-                      (WPARAM)((next != 0u) ? BST_CHECKED : BST_UNCHECKED), 0u);
-    return next;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -555,17 +535,9 @@ static void tool_create_controls(HWND hwnd)
                                        WS_BORDER),
                             TOOL_DBG_IDC_ED_TX, UI_FONT_KIND_EDIT);
 
-    /* 开关控件 */
-    (void)tool_create_child(hwnd, L"BUTTON", L"时间戳",
-                            (uint32_t)BS_AUTOCHECKBOX, TOOL_DBG_IDC_CK_TS, UI_FONT_KIND_BTN);
-    (void)tool_create_child(hwnd, L"BUTTON", L"暂停显示",
-                            (uint32_t)BS_AUTOCHECKBOX, TOOL_DBG_IDC_CK_PAUSE, UI_FONT_KIND_BTN);
+    /* 开关控件: 时间戳/暂停显示经视图菜单(无界面控件), 此处仅发送行的加回车 */
     (void)tool_create_child(hwnd, L"BUTTON", L"发送加回车",
                             (uint32_t)BS_AUTOCHECKBOX, TOOL_DBG_IDC_CK_APPEND, UI_FONT_KIND_BTN);
-
-    /* 时间戳缺省开启: 确保每行行首有时间戳 */
-    (void)SendMessageW(GetDlgItem(hwnd, (int)TOOL_DBG_IDC_CK_TS),
-                       BM_SETCHECK, (WPARAM)BST_CHECKED, 0u);
 
     /* 接收区文本上限(接收缓存档位从ini加载) */
     g_tool_cache_kb = dbg_conf_get_uint(L"View", L"RxCacheKB", 256u);
@@ -798,8 +770,7 @@ static void tool_append_rx(HWND hwnd, const wchar_t *p_text)
     uint32_t crlf = 0u;
     const wchar_t *p = p_text;
 
-    if (SendMessageW(GetDlgItem(hwnd, (int)TOOL_DBG_IDC_CK_PAUSE),
-                     BM_GETCHECK, 0u, 0u) == BST_CHECKED) {
+    if (g_tool_pause_on != 0u) {
         return;
     }
     h_rx = GetDlgItem(hwnd, (int)TOOL_DBG_IDC_ED_RX);
@@ -999,8 +970,7 @@ static void tool_handle_line(HWND hwnd, const wchar_t *p_line)
     uint32_t group_idx = 0u;
     uint32_t ret = 0u;
 
-    if (SendMessageW(GetDlgItem(hwnd, (int)TOOL_DBG_IDC_CK_PAUSE),
-                     BM_GETCHECK, 0u, 0u) == BST_CHECKED) {
+    if (g_tool_pause_on != 0u) {
         return;   /* 暂停显示: 主窗与过滤窗都不追加(管线与保存照常) */
     }
 
@@ -1065,8 +1035,7 @@ static void tool_process_rx(HWND hwnd)
     memset(&bytes[0], 0, sizeof(bytes));
     memset(&out[0], 0, sizeof(out));
     memset(&opt, 0, sizeof(opt));
-    opt.ts_enable = (SendMessageW(GetDlgItem(hwnd, (int)TOOL_DBG_IDC_CK_TS),
-                                  BM_GETCHECK, 0u, 0u) == BST_CHECKED) ? 1u : 0u;
+    opt.ts_enable = g_tool_ts_on;
     opt.p_dir_tag = NULL;   /* RX行不带方向标记; TX回显自带[TX] */
     opt.enc = (uint32_t)DBG_FRAME_ENC_UTF8;
     opt.strip_dev_ts = g_tool_strip_dev;
@@ -1500,12 +1469,19 @@ static LRESULT CALLBACK tool_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                         break;
                     }
                     case TOOL_DBG_MID_TS:
+                    {
+                        g_tool_ts_on = (g_tool_ts_on != 0u) ? 0u : 1u;
+                        tool_set_status((g_tool_ts_on != 0u)
+                                            ? L"时间戳: 开(对新到日志生效)"
+                                            : L"时间戳: 关");
+                        break;
+                    }
                     case TOOL_DBG_MID_PAUSE:
                     {
-                        uint32_t ck_id = ((id == TOOL_DBG_MID_TS) ? TOOL_DBG_IDC_CK_TS :
-                                          TOOL_DBG_IDC_CK_PAUSE);
-
-                        (void)tool_toggle_check(hwnd, ck_id);
+                        g_tool_pause_on = (g_tool_pause_on != 0u) ? 0u : 1u;
+                        tool_set_status((g_tool_pause_on != 0u)
+                                            ? L"暂停显示: 开(接收与保存继续)"
+                                            : L"暂停显示: 关");
                         break;
                     }
                     case TOOL_DBG_MID_FILTERWIN:
