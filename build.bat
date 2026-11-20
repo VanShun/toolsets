@@ -43,6 +43,8 @@ rem --- To add a tool: append its module sources to the list below ---
     tools\dbgterm\color_view.c ^
     tools\dbgterm\dbg_save.c ^
     tools\dbgterm\dbg_conf.c ^
+    tools\gb32960\tool_gb32960.c ^
+    tools\gb32960\gb32960.c ^
     tools\dbgterm\adb_core.c ^
     tools\dbgterm\dbg_source.c ^
     tools\dbgterm\dbg_frame.c ^
@@ -88,6 +90,18 @@ if errorlevel 1 (
     exit /b 1
 )
 %OUT%\test_dbg_filter.exe
+if errorlevel 1 (
+    echo [ERROR] unit tests failed.
+    exit /b 1
+)
+%CC% %CFLAGS% -Itools\gb32960 -o %OUT%\test_gb32960.exe ^
+    tools\gb32960\tests\test_gb32960.c ^
+    tools\gb32960\gb32960.c
+if errorlevel 1 (
+    echo [ERROR] unit test build failed.
+    exit /b 1
+)
+%OUT%\test_gb32960.exe
 if errorlevel 1 (
     echo [ERROR] unit tests failed.
     exit /b 1

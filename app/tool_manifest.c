@@ -11,12 +11,14 @@
 #include "tool_manifest.h"
 #include "../tools/hexascii/tool_hexascii.h"
 #include "../tools/dbgterm/tool_dbgterm.h"
+#include "../tools/gb32960/tool_gb32960.h"
 
 /* -------------------------------------------------------------------------- */
 /*  宏定义                                                                     */
 /* -------------------------------------------------------------------------- */
 #define TOOL_ACCENT_BLUE   0x00F6823B  /**< 主题蓝 #3B82F6 */
 #define TOOL_ACCENT_GREEN  0x005EC522  /**< 主题绿 #22C55E */
+#define TOOL_ACCENT_PURPLE 0x00CC66AA  /**< 主题紫 #AA66CC */
 
 /* -------------------------------------------------------------------------- */
 /*  模块内部全局变量(只读登记表)                                                */
@@ -37,6 +39,13 @@ static const TOOL_INFO_T g_tool_manifest_table[] =
         L"ADB logcat接收·过滤·录制 (串口第二阶段)",
         TOOL_ACCENT_GREEN,
         tool_dbgterm_open
+    },
+    {
+        L"❖",
+        L"GB32960 解析",
+        L"国标车辆报文解析 (2016/2025版, 多帧连报)",
+        TOOL_ACCENT_PURPLE,
+        tool_gb32960_open
     },
 };
 
