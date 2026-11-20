@@ -110,12 +110,18 @@
 #define TOOL_DBG_RICHED_CLASS   L"RichEdit20W"             /**< RichEdit窗口类 */
 #define TOOL_DBG_EM_SETCHARFORMAT (WM_USER + 68)           /**< 设置字符格式消息 */
 #define TOOL_DBG_EM_POSFROMCHAR (WM_USER + 58)             /**< 查询字符客户区坐标 */
+#define TOOL_DBG_EM_GETSCROLLPOS (WM_USER + 221)           /**< 获取滚动像素位置 */
+#define TOOL_DBG_EM_SETSCROLLPOS (WM_USER + 222)           /**< 恢复滚动像素位置 */
+#define TOOL_DBG_EM_GETFIRSTVISIBLELINE 0x00CEu             /**< 首可见行号 */
+#define TOOL_DBG_EM_LINEINDEX    0x00BBu                   /**< 行号->字符索引 */
+#define TOOL_DBG_EM_GETLINECOUNT 0x00BAu                   /**< 总行数 */
 #define TOOL_DBG_SCF_SELECTION  0x0001u                    /**< 作用于当前选区 */
 #define TOOL_DBG_CFM_COLOR      0x40000000u                /**< 颜色掩码 */
 #define TOOL_DBG_COLOR_MAX      32u                        /**< 多彩关键字词条上限 */
 #define TOOL_DBG_COLOR_KW_WCHAR 64u                        /**< 关键字宽字符容量 */
 #define TOOL_DBG_COLOR_SEG_MAX  48u                        /**< 单行着色片段上限(超出降级纯文本) */
 #define TOOL_DBG_COLOR_LINE_LIMIT 150u                     /**< 单拍着色行数上限(洪峰降级) */
+#define TOOL_DBG_TRIM_HARD_MULT  16u                       /**< 上滚浏览不裁剪倍数(超过强制回底防内存无限增长) */
 
 /* -------------------------------------------------------------------------- */
 /*  内部类型                                                                    */
@@ -157,6 +163,8 @@ static uint32_t  g_tool_cache_kb = 256u;                   /**< 接收缓存档�
 static uint8_t   g_tool_strip_dev = 1u;                    /**< 精简设备时间戳开关 */
 static uint8_t   g_tool_ts_on = 1u;                        /**< 时间戳开关(视图菜单, 缺省开) */
 static uint8_t   g_tool_pause_on = 0u;                     /**< 暂停显示开关(视图菜单, 缺省关) */
+static uint8_t   g_tool_in_batch = 0u;                     /**< 接收批量事务进行中标志 */
+static uint8_t   g_tool_batch_lock = 0u;                   /**< 批级滚动锁定标志(拍首用新鲜布局判定, 批内不再重查) */
 static wchar_t   g_tool_status_text[160] = {0};            /**< 状态栏首格文本 */
 static uint8_t   g_tool_use_rich = 0u;                     /**< 接收区为RichEdit标志 */
 static uint32_t  g_tool_color_tick_lines = 0u;             /**< 本拍已着色行数(洪峰降级) */
@@ -719,33 +727,58 @@ static void tool_invalidate_btn(HWND hwnd, uint32_t ctrl_id)
 /* -------------------------------------------------------------------------- */
 
 /**
+ * @brief   查询RichEdit单行像素高度(用控件字体实测, 拉取DC临时测量)
+ * @param   h_rx 接收区句柄
+ * @return  行高(像素); 失败返回16
+ */
+static uint32_t tool_rx_line_height(HWND h_rx)
+{
+    HDC hdc = GetDC(h_rx);
+    HFONT h_font = (HFONT)SendMessageW(h_rx, WM_GETFONT, 0u, 0u);
+    HFONT h_old = (HFONT)SelectObject(hdc, h_font);
+    TEXTMETRICW tm;
+    uint32_t height = 16u;
+
+    memset(&tm, 0, sizeof(tm));
+    if (GetTextMetricsW(hdc, &tm) != 0) {
+        height = (uint32_t)(tm.tmHeight + tm.tmExternalLeading);
+        if (height == 0u) {
+            height = 16u;
+        }
+    }
+    (void)SelectObject(hdc, h_old);
+    ReleaseDC(h_rx, hdc);
+
+    return height;
+}
+
+/**
  * @brief   判断接收区是否位于最底部(自动跟随的条件)
- *          用户上滚浏览历史时暂停自动滚动, 回到底部恢复跟随;
- *          RichEdit关重绘期间GetScrollInfo不刷新, 改用末字符坐标判定
+ *          首可见行 + 可见行数 >= 总行数(±2行容差); 全部走返回值型消息,
+ *          不依赖POSCROLLINFO/POSCFROMCHAR(关重绘或riched20版本下不可靠)
  * @param   h_rx 接收区句柄
  * @return  1: 在底部(或内容不足一屏); 0: 用户已上滚
  */
 static uint8_t tool_rx_at_bottom(HWND h_rx)
 {
     if (g_tool_use_rich != 0u) {
-        /* EM_POSFROMCHAR: wParam=字符索引, lParam=POINTL*(RE1.0版相反, riched20为本序) */
-        typedef struct TOOL_PT1_TAG
-        {
-            LONG x;
-            LONG y;
-        } TOOL_PT1_T;
-        TOOL_PT1_T pt;
+        LRESULT first = 0;
+        LRESULT lines = 0;
         RECT rc;
-        WPARAM idx = (g_tool_rx_pos > 0u) ? (WPARAM)(g_tool_rx_pos - 1u) : (WPARAM)0u;
+        uint32_t line_h = 0u;
+        uint32_t visible_lines = 0u;
 
-        memset(&pt, 0, sizeof(pt));
+        first = SendMessageW(h_rx, TOOL_DBG_EM_GETFIRSTVISIBLELINE, 0u, 0u);
+        lines = SendMessageW(h_rx, TOOL_DBG_EM_GETLINECOUNT, 0u, 0u);
         memset(&rc, 0, sizeof(rc));
-        if (g_tool_rx_pos == 0u) {
-            return 1u;
-        }
         GetClientRect(h_rx, &rc);
-        (void)SendMessageW(h_rx, TOOL_DBG_EM_POSFROMCHAR, idx, (LPARAM)&pt);
-        return (pt.y < (rc.bottom - 4)) ? 1u : 0u;
+        line_h = tool_rx_line_height(h_rx);
+        visible_lines = ((uint32_t)(rc.bottom - rc.top) + line_h - 1u) / line_h;
+        if (visible_lines < 1u) {
+            visible_lines = 1u;
+        }
+
+        return ((first + (LRESULT)visible_lines + 2) >= lines) ? 1u : 0u;
     }
 
     /* 普通EDIT降级路径: 标准滚动条信息 */
@@ -763,6 +796,26 @@ static uint8_t tool_rx_at_bottom(HWND h_rx)
         }
 
         return ((si.nPos + (int)(si.nPage) + 2) >= si.nMax) ? 1u : 0u;
+    }
+}
+
+/**
+ * @brief   恢复锁定时的视口: 复位滚动像素位置并把光标移回可视首行
+ *          (RichEdit绘制时会把文末光标滚入视野, 仅恢复滚动位置会被再次拉底)
+ * @param   h_rx 接收区句柄
+ * @param   p_sp 批首保存的滚动像素位置
+ * @return  无
+ */
+static void tool_rx_restore_view(HWND h_rx, const POINT *p_sp)
+{
+    LRESULT first_line = 0u;
+    LRESULT ch = 0u;
+
+    (void)SendMessageW(h_rx, TOOL_DBG_EM_SETSCROLLPOS, 0u, (LPARAM)p_sp);
+    first_line = SendMessageW(h_rx, TOOL_DBG_EM_GETFIRSTVISIBLELINE, 0u, 0u);
+    ch = SendMessageW(h_rx, TOOL_DBG_EM_LINEINDEX, (WPARAM)first_line, 0u);
+    if (ch >= 0) {
+        (void)SendMessageW(h_rx, EM_SETSEL, (WPARAM)ch, (LPARAM)ch);
     }
 }
 
@@ -787,17 +840,27 @@ static void tool_rx_apply_charcolor(HWND h_rx, uint32_t color)
 
 /**
  * @brief   接收区超限裁头(RichEdit计量)
- *          底部跟随时按上限裁剪; 用户上滚浏览时放宽至2倍上限再裁(防视口跳动)
+ *          底部跟随时按上限裁剪; 用户上滚浏览时不裁剪(裁剪会移动视口内容,
+ *          表现为"锁定失效"), 仅在达到16倍硬上限时强制回底裁剪防内存无限增长
  * @param   h_rx  接收区句柄
  * @param   stick 1=当前在底部
- * @return  无
+ * @return  1=已强制回底(调用方本拍按跟随处理); 0=正常
  */
-static void tool_rx_trim(HWND h_rx, uint8_t stick)
+static uint8_t tool_rx_trim(HWND h_rx, uint8_t stick)
 {
-    uint32_t cap_effective = (stick != 0u) ? g_tool_rx_cap : (g_tool_rx_cap * 2u);
-
-    if (g_tool_rx_pos <= cap_effective) {
-        return;
+    if (g_tool_rx_pos <= g_tool_rx_cap) {
+        return 0u;
+    }
+    if (stick == 0u) {
+        if (g_tool_rx_pos <= (g_tool_rx_cap * TOOL_DBG_TRIM_HARD_MULT)) {
+            return 0u;   /* 上滚浏览: 不裁剪, 保视口稳定 */
+        }
+        /* 硬上限: 强制回底并裁剪(极罕见, 防内存无限增长) */
+        (void)SendMessageW(h_rx, WM_VSCROLL, (WPARAM)SB_BOTTOM, (LPARAM)0);
+        stick = 1u;
+        if (g_tool_hwnd != NULL) {
+            tool_set_status(L"缓冲已达上限, 已回底裁剪(可调大 视图→接收缓存)");
+        }
     }
     {
         uint32_t del_chars = g_tool_rx_pos / 2u;
@@ -808,6 +871,8 @@ static void tool_rx_trim(HWND h_rx, uint8_t stick)
         (void)SendMessageW(h_rx, EM_SETREADONLY, (WPARAM)TRUE, (LPARAM)0);
         g_tool_rx_pos -= del_chars;
     }
+
+    return stick;
 }
 
 /**
@@ -823,16 +888,28 @@ static void tool_append_rx(HWND hwnd, const wchar_t *p_text)
     uint32_t crlf = 0u;
     const wchar_t *p = p_text;
     uint8_t stick = 0u;
+    POINT sp = {0, 0};
 
     if (g_tool_pause_on != 0u) {
         return;
     }
     h_rx = GetDlgItem(hwnd, (int)TOOL_DBG_IDC_ED_RX);
-    stick = tool_rx_at_bottom(h_rx);   /* 追加前捕捉: 用户上滚时不自动跟随 */
+    if (g_tool_in_batch != 0u) {
+        /* 批内: 信任拍首判定(关重绘期间布局过期, 逐行重查POSFROMCHAR得脏值) */
+        stick = (g_tool_batch_lock != 0u) ? 0u : 1u;
+    } else {
+        stick = tool_rx_at_bottom(h_rx);   /* 独立调用(如TX回显): 自查 */
+    }
 
     if (g_tool_use_rich != 0u) {
+        if (stick == 0u) {
+            /* 锁定: 记录滚动像素位置, 追加后恢复(EM_REPLACESEL会拉光标入视野) */
+            (void)SendMessageW(h_rx, TOOL_DBG_EM_GETSCROLLPOS, 0u, (LPARAM)&sp);
+        }
         (void)SendMessageW(h_rx, EM_SETREADONLY, (WPARAM)FALSE, (LPARAM)0);
-        tool_rx_trim(h_rx, stick);
+        if (tool_rx_trim(h_rx, stick) != 0u) {
+            stick = 1u;   /* 硬上限强制回底: 本拍转跟随 */
+        }
         (void)SendMessageW(h_rx, EM_SETSEL, (WPARAM)g_tool_rx_pos, (LPARAM)g_tool_rx_pos);
         tool_rx_apply_charcolor(h_rx, 0x00000000u);
         (void)SendMessageW(h_rx, EM_REPLACESEL, FALSE, (LPARAM)p_text);
@@ -845,6 +922,11 @@ static void tool_append_rx(HWND hwnd, const wchar_t *p_text)
             }
         }
         g_tool_rx_pos += len - crlf;
+        if (stick != 0u) {
+            (void)SendMessageW(h_rx, WM_VSCROLL, (WPARAM)SB_BOTTOM, (LPARAM)0);
+        } else {
+            tool_rx_restore_view(h_rx, &sp);
+        }
     } else {
         uint32_t cur = 0u;
 
@@ -856,9 +938,9 @@ static void tool_append_rx(HWND hwnd, const wchar_t *p_text)
         cur = (uint32_t)SendMessageW(h_rx, WM_GETTEXTLENGTH, 0u, 0u);
         (void)SendMessageW(h_rx, EM_SETSEL, (WPARAM)cur, (LPARAM)cur);
         (void)SendMessageW(h_rx, EM_REPLACESEL, FALSE, (LPARAM)p_text);
-    }
-    if (stick != 0u) {
-        (void)SendMessageW(h_rx, WM_VSCROLL, (WPARAM)SB_BOTTOM, (LPARAM)0);
+        if (stick != 0u) {
+            (void)SendMessageW(h_rx, WM_VSCROLL, (WPARAM)SB_BOTTOM, (LPARAM)0);
+        }
     }
 }
 
@@ -973,9 +1055,8 @@ static void tool_append_rx_colored(HWND hwnd, const wchar_t *p_line)
     }
 
     /* 分段追加: 未命中段黑色, 命中段按词色; 行尾CRLF黑色
-       (滚动跟随与裁剪由外层 tool_append_rx 统一处理) */
+       (滚动跟随与裁剪由外层 tool_process_rx 批量统一处理) */
     (void)SendMessageW(h_rx, EM_SETREADONLY, (WPARAM)FALSE, (LPARAM)0);
-    tool_rx_trim(h_rx, tool_rx_at_bottom(h_rx));
     {
         wchar_t piece[TOOL_DBG_LINE_BUF_WCHAR + 4u];
         uint32_t cursor = 0u;
@@ -1090,6 +1171,7 @@ static void tool_process_rx(HWND hwnd)
     uint32_t pass = 0u;
     uint32_t overflow = 0u;
     uint8_t  stick = 1u;   /* 批处理开始时的底部跟随状态 */
+    POINT    sp = {0, 0};  /* 锁定时的滚动像素位置 */
 
     memset(&bytes[0], 0, sizeof(bytes));
     memset(&out[0], 0, sizeof(out));
@@ -1100,7 +1182,17 @@ static void tool_process_rx(HWND hwnd)
     opt.strip_dev_ts = g_tool_strip_dev;
 
     g_tool_color_tick_lines = 0u;
-    stick = tool_rx_at_bottom(h_rx);   /* 拍首捕捉: 用户上滚时整拍不自动跟随 */
+    stick = tool_rx_at_bottom(h_rx);   /* 拍首捕捉(此时布局新鲜): 用户上滚时整拍锁定 */
+    g_tool_batch_lock = (stick != 0u) ? 0u : 1u;
+    g_tool_in_batch = 1u;
+    if ((stick == 0u) && (g_tool_use_rich != 0u)) {
+        /* 锁定: 记录滚动像素位置, 批量追加后恢复 */
+        (void)SendMessageW(h_rx, TOOL_DBG_EM_GETSCROLLPOS, 0u, (LPARAM)&sp);
+    }
+    if (tool_rx_trim(h_rx, stick) != 0u) {
+        stick = 1u;   /* 硬上限强制回底: 本拍转跟随 */
+        g_tool_batch_lock = 0u;
+    }
 
     /* 批量事务: 过滤窗口整个节拍只解锁/重绘一次 */
     if (filter_view_is_open() != 0u) {
@@ -1135,11 +1227,14 @@ static void tool_process_rx(HWND hwnd)
     if (filter_view_is_open() != 0u) {
         filter_view_end_batch();
     }
+    g_tool_in_batch = 0u;
     if (g_tool_use_rich != 0u) {
         (void)SendMessageW(h_rx, WM_SETREDRAW, (WPARAM)TRUE, (LPARAM)0);
         (void)InvalidateRect(h_rx, NULL, FALSE);
         if (stick != 0u) {
             (void)SendMessageW(h_rx, WM_VSCROLL, (WPARAM)SB_BOTTOM, (LPARAM)0);
+        } else {
+            tool_rx_restore_view(h_rx, &sp);
         }
     }
 
