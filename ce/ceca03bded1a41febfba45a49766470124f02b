@@ -1,0 +1,40 @@
+tools/dbgterm/tool_dbgterm.c
+  s_6ec8c668b5ee1e::t_35aa80ef64bfcd 1141-1143
+  s_6ec8c668b5ee1e::t_65222dae0b2d45 731,739,747
+  s_6ec8c668b5ee1e::t_17fb81f626bad4 975-976,978
+  s_6ec8c668b5ee1e::t_80f3e542498ac3 112
+  s_6ec8c668b5ee1e::t_6c0bd0de95a954 1092,1103
+  s_6ec8c668b5ee1e::t_987d5c19398935 825,831,835,860-862
+  s_6ec8c668b5ee1e::t_5b0851522719ae 725-729,749-750,767-768
+  s_6ec8c668b5ee1e::t_3ae14d1fe84ee7 790-792,795,797-799
+  s_6ec8c668b5ee1e::t_489a9799b9501f 722-724,730,732-738,740-746,748,751-766
+  s_6ec8c668b5ee1e::t_747e6fd4479249 721
+tools/dbgterm/filter_view.c
+  s_6ec8c668b5ee1e::t_56b16a0b2502ad 100
+  s_6ec8c668b5ee1e::t_81c31bdba25a38 769,777,785
+  s_6ec8c668b5ee1e::t_6bfd25c68b51d2 872-873,875
+  s_6ec8c668b5ee1e::t_867259e7b3f0b1 760,763-767,787-788,804-805,817,839-843
+  s_6ec8c668b5ee1e::t_82859983266503 964
+  s_6ec8c668b5ee1e::t_4a1c1d2542913f 62
+  s_6ec8c668b5ee1e::t_96e98b4d3c4124 761-762,768,770-776,778-784,786,789-803
+CHANGELOG.md
+  s_6ec8c668b5ee1e::t_b71d7281627b26 5-14
+version.h
+  s_6ec8c668b5ee1e::t_da736314f04db2 18,21-22,24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cececa03bded1a41febfba45a49766470124f02b",
+  "prompts": {},
+  "sessions": {
+    "s_6ec8c668b5ee1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4634b95e-8dd0-451c-9050-4e05c2830dcb",
+        "model": "glm-5.3"
+      },
+      "human_author": "herongshun <herongshun@yaxon.com>"
+    }
+  }
+}
