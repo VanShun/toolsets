@@ -59,6 +59,7 @@
 
 /* RichEdit着色所需本地定义(避免旧头文件差异) */
 #define FLT_EM_SETCHARFORMAT   (WM_USER + 68)           /**< 设置字符格式消息 */
+#define FLT_EM_POSFROMCHAR     (WM_USER + 58)           /**< 查询字符客户区坐标 */
 #define FLT_SCF_SELECTION      0x0001u                  /**< 作用于当前选区 */
 #define FLT_CFM_COLOR          0x40000000u              /**< 颜色掩码 */
 #define FLT_CFE_AUTOCOLOR      0x40000000u              /**< 自动色效果(清除用) */
@@ -96,6 +97,7 @@ static uint32_t  g_flt_rich_pos = 0u;                          /**< 日志区末
 static uint32_t  g_flt_rich_len = 0u;                          /**< 日志区字符总数(RichEdit计量) */
 static uint32_t  g_flt_batch = 0u;                             /**< 批处理嵌套计数 */
 static uint32_t  g_flt_batch_lines = 0u;                       /**< 本批已追加行数(超限降级为纯追加) */
+static uint8_t   g_flt_stick = 1u;                             /**< 批首底部跟随状态(用户上滚时暂停自动滚动) */
 static uint8_t   g_flt_rich_ready = 0u;                        /**< RichEdit探测标志 */
 static uint8_t   g_flt_use_rich = 0u;                          /**< 日志区为RichEdit标志 */
 
@@ -755,6 +757,52 @@ static int32_t flt_find_ci(const wchar_t *p_line, const wchar_t *p_kw, uint32_t 
     return -1;
 }
 
+/**
+ * @brief   判断过滤日志区是否位于最底部(自动跟随的条件)
+ *          RichEdit关重绘期间GetScrollInfo不刷新, 改用末字符坐标判定
+ * @param   h_log 日志区句柄
+ * @return  1: 在底部(或内容不足一屏); 0: 用户已上滚
+ */
+static uint8_t flt_at_bottom(HWND h_log)
+{
+    if (g_flt_use_rich != 0u) {
+        /* EM_POSFROMCHAR: wParam=字符索引, lParam=POINTL*(RE1.0版相反, riched20为本序) */
+        typedef struct FLT_PT1_TAG
+        {
+            LONG x;
+            LONG y;
+        } FLT_PT1_T;
+        FLT_PT1_T pt;
+        RECT rc;
+        WPARAM idx = (g_flt_rich_pos > 0u) ? (WPARAM)(g_flt_rich_pos - 1u) : (WPARAM)0u;
+
+        memset(&pt, 0, sizeof(pt));
+        memset(&rc, 0, sizeof(rc));
+        if (g_flt_rich_pos == 0u) {
+            return 1u;
+        }
+        GetClientRect(h_log, &rc);
+        (void)SendMessageW(h_log, FLT_EM_POSFROMCHAR, idx, (LPARAM)&pt);
+        return (pt.y < (rc.bottom - 4)) ? 1u : 0u;
+    }
+
+    {
+        SCROLLINFO si;
+
+        memset(&si, 0, sizeof(si));
+        si.cbSize = (UINT)sizeof(si);
+        si.fMask = (SIF_PAGE | SIF_RANGE | SIF_POS);
+        if (GetScrollInfo(h_log, SB_VERT, &si) == 0) {
+            return 1u;
+        }
+        if (si.nMax <= (int)(si.nPage)) {
+            return 1u;
+        }
+
+        return ((si.nPos + (int)(si.nPage) + 2) >= si.nMax) ? 1u : 0u;
+    }
+}
+
 void filter_view_begin_batch(void)
 {
     if ((g_flt_hwnd == NULL) || (g_flt_batch != 0u)) {
@@ -766,6 +814,7 @@ void filter_view_begin_batch(void)
     if (g_flt_use_rich != 0u) {
         HWND h_log = GetDlgItem(g_flt_hwnd, (int)FLT_VIEW_IDC_ED_LOG);
 
+        g_flt_stick = flt_at_bottom(h_log);   /* 批首捕捉跟随状态 */
         /* 整批仅一次: 解锁+关重绘, 避免逐行解锁引发的重排/重绘风暴 */
         (void)SendMessageW(h_log, WM_SETREDRAW, (WPARAM)FALSE, (LPARAM)0);
         (void)SendMessageW(h_log, EM_SETREADONLY, (WPARAM)FALSE, (LPARAM)0);
@@ -787,8 +836,11 @@ void filter_view_end_batch(void)
         (void)SendMessageW(h_log, EM_SETREADONLY, (WPARAM)TRUE, (LPARAM)0);
         (void)SendMessageW(h_log, WM_SETREDRAW, (WPARAM)TRUE, (LPARAM)0);
         (void)InvalidateRect(h_log, NULL, FALSE);
-        (void)SendMessageW(h_log, EM_SETSEL, (WPARAM)g_flt_rich_pos, (LPARAM)g_flt_rich_pos);
-        (void)SendMessageW(h_log, WM_VSCROLL, (WPARAM)SB_BOTTOM, (LPARAM)0);
+        if (g_flt_stick != 0u) {
+            (void)SendMessageW(h_log, EM_SETSEL, (WPARAM)g_flt_rich_pos,
+                               (LPARAM)g_flt_rich_pos);
+            (void)SendMessageW(h_log, WM_VSCROLL, (WPARAM)SB_BOTTOM, (LPARAM)0);
+        }
     }
 }
 
@@ -817,9 +869,10 @@ void filter_view_append_hit(const wchar_t *p_line, uint32_t group_idx)
 
     if (g_flt_use_rich != 0u) {
         /* RichEdit路径: 位置/长度均按其内部计量(CRLF=1字符)自维护,
-           不得使用GetWindowTextLength(其按CRLF=2计数, 会导致着色逐行右漂) */
+           不得使用GetWindowTextLength(其按CRLF=2计数, 会导致着色逐行右漂);
+           用户上滚浏览时放宽裁剪阈值为2倍上限(防视口跳动) */
         base = g_flt_rich_pos;
-        if (g_flt_rich_len > FLT_VIEW_LOG_CAP) {
+        if (g_flt_rich_len > ((g_flt_stick != 0u) ? FLT_VIEW_LOG_CAP : (FLT_VIEW_LOG_CAP * 2u))) {
             uint32_t del_chars = g_flt_rich_len / 2u;
 
             (void)SendMessageW(h_log, EM_SETSEL, 0, (LPARAM)del_chars);
@@ -908,9 +961,7 @@ void filter_view_append_hit(const wchar_t *p_line, uint32_t group_idx)
     dbg_save_feed_ch(DBG_SAVE_CH_FILTER, &buf[0]);
 
     if (self_batch != 0u) {
-        filter_view_end_batch();
-    } else {
-        (void)SendMessageW(h_log, WM_VSCROLL, (WPARAM)SB_BOTTOM, (LPARAM)0);
+        filter_view_end_batch();   /* 滚动跟随在批尾按g_flt_stick决定 */
     }
 }
 
