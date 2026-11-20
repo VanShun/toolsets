@@ -1,0 +1,55 @@
+CHANGELOG.md
+  s_6ec8c668b5ee1e::t_ed31fd6f89609d 5-17
+tools/dbgterm/filter_view.c
+  s_6ec8c668b5ee1e::t_2a11a35c56d9a1 866,871
+  s_6ec8c668b5ee1e::t_c66704dbaacdbd 63-64
+  s_6ec8c668b5ee1e::t_9e8aa0aca6dc87 837-840
+  s_6ec8c668b5ee1e::t_2d5027acd8256e 867-870,872-876
+  s_6ec8c668b5ee1e::t_c4790b3465c7fa 106
+  s_6ec8c668b5ee1e::t_941104e07b17f5 768,775-776,778-794,796-797,800-805
+  s_6ec8c668b5ee1e::t_22c17639975433 912,914
+  s_6ec8c668b5ee1e::t_67b3c227d41af4 67
+  s_6ec8c668b5ee1e::t_2bd37ae033dd04 65-66
+  s_6ec8c668b5ee1e::t_44f4ecb34823b6 907,909-910,913,915-925
+tools/dbgterm/tool_dbgterm.c
+  s_6ec8c668b5ee1e::t_8d55e5d6a91cb5 115-116
+  s_6ec8c668b5ee1e::t_0454eba9750d3f 1188,1190,1195
+  s_6ec8c668b5ee1e::t_a25cec81537edc 1237
+  s_6ec8c668b5ee1e::t_711e3477ec5cf8 897-902
+  s_6ec8c668b5ee1e::t_9b42833d23901b 166-167
+  s_6ec8c668b5ee1e::t_cc4fb80fd6b00f 1236
+  s_6ec8c668b5ee1e::t_8a1399b544e744 1174
+  s_6ec8c668b5ee1e::t_3ef080b71033c1 730-754,757-758,765-766,768-769,771-772,775-781
+  s_6ec8c668b5ee1e::t_883bf53f92a321 928
+  s_6ec8c668b5ee1e::t_8a6f3524a61cf9 117
+  s_6ec8c668b5ee1e::t_3dc8efdebcf99d 1185-1187,1189,1191-1194
+  s_6ec8c668b5ee1e::t_3df5fb7a2afc96 844,855,861-863
+  s_6ec8c668b5ee1e::t_2e61a66ad003d5 113-114
+  s_6ec8c668b5ee1e::t_3f50363b15eb03 847,849,852,856,860,874-875
+  s_6ec8c668b5ee1e::t_96f9a83380a057 891,905-908,910-912,925-927,929,941-943
+  s_6ec8c668b5ee1e::t_8b7039b5660d29 1058
+  s_6ec8c668b5ee1e::t_cb1d15a47831a1 1230
+  s_6ec8c668b5ee1e::t_f10773bf384894 124
+  s_6ec8c668b5ee1e::t_4107d976b77671 843,851,853-854,857-859
+  s_6ec8c668b5ee1e::t_6e2a8a2160be15 803-821
+  s_6ec8c668b5ee1e::t_ec82dba66e8faa 729
+  s_6ec8c668b5ee1e::t_e5e3bed71bfe42 802
+version.h
+  s_6ec8c668b5ee1e::t_2893aafc3d1da9 18,21-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a7fad4de8011bcb6ca50438b4c92add3d06c4066",
+  "prompts": {},
+  "sessions": {
+    "s_6ec8c668b5ee1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4634b95e-8dd0-451c-9050-4e05c2830dcb",
+        "model": "glm-5.3"
+      },
+      "human_author": "herongshun <herongshun@yaxon.com>"
+    }
+  }
+}
