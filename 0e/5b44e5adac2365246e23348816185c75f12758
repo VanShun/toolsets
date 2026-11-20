@@ -1,0 +1,30 @@
+CHANGELOG.md
+  s_6ec8c668b5ee1e::t_ef49cbbbaebf99 5-11
+tools/dbgterm/tool_dbgterm.c
+  s_6ec8c668b5ee1e::t_3d88d30d889ec0 1038
+  s_6ec8c668b5ee1e::t_24dc367d4874ee 1472-1478,1481-1484
+  s_6ec8c668b5ee1e::t_412ba3569fe6d7 33
+  s_6ec8c668b5ee1e::t_dfbfc528a286db 773
+  s_6ec8c668b5ee1e::t_9cce007fe7ee70 157-158
+  s_6ec8c668b5ee1e::t_e84455e537af20 367,369,371
+  s_6ec8c668b5ee1e::t_1ff3c20b51b8f9 538
+  s_6ec8c668b5ee1e::t_aecf4d1dbcb8b9 973
+version.h
+  s_6ec8c668b5ee1e::t_4616b30cb86453 1,18,21-22,24
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0e5b44e5adac2365246e23348816185c75f12758",
+  "prompts": {},
+  "sessions": {
+    "s_6ec8c668b5ee1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4634b95e-8dd0-451c-9050-4e05c2830dcb",
+        "model": "glm-5.3"
+      },
+      "human_author": "herongshun <herongshun@yaxon.com>"
+    }
+  }
+}
