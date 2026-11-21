@@ -181,6 +181,7 @@ static uint32_t build_report(wchar_t *p_hex)
     put8(buf, &pos, 0x01u);        /* DC-DC 工作 */
     put8(buf, &pos, 0x0Eu);        /* 自动D挡 */
     put16(buf, &pos, 3000u);       /* 绝缘 3000kΩ */
+    put16(buf, &pos, 0xBEEFu);     /* 2016版: 绝缘后2字节预留字段 */
 
     /* 位置数据 */
     put8(buf, &pos, 0x05u);
@@ -287,6 +288,14 @@ static int32_t test_report(void)
         printf("[FAIL] test_report: gps flag wrong\n");
         return TEST_FAIL;
     }
+    if (wcsstr(&g_out[0], L"绝缘电阻: 3000 (0x0BB8) = 3000 kΩ") == NULL) {
+        printf("[FAIL] test_report: insulation wrong\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"预留字段: 0xBEEF (2字节, 2016版)") == NULL) {
+        printf("[FAIL] test_report: 2016 reserved field missing\n");
+        return TEST_FAIL;
+    }
 
     return TEST_PASS;
 }
@@ -372,6 +381,90 @@ static int32_t test_errors(void)
 }
 
 /**
+ * @brief   测试节点树接口: 切帧/单帧节点解析/帧标志/文本物化
+ * @param   无
+ * @return  0: 通过; 1: 失败
+ */
+static int32_t test_nodes(void)
+{
+    wchar_t hex[768u];
+    uint8_t bytes[GB32960_FRAME_MAX];
+    uint32_t offs[4u];
+    uint32_t lens[4u];
+    uint32_t frames = 0u;
+    uint32_t count = 0u;
+    uint32_t i = 0u;
+    uint32_t frame_nodes = 0u;
+    uint32_t ok = 0u;
+    GB32960_NODE_T nodes[512u];
+
+    memset(&hex[0], 0, sizeof(hex));
+    (void)build_report(&hex[0]);
+    frames = gb32960_decode_split(&hex[0], &bytes[0], GB32960_FRAME_MAX,
+                                  &offs[0], &lens[0], 4u, NULL, 0u);
+    if (frames != 1u) {
+        printf("[FAIL] test_nodes: split frames=%u\n", (unsigned int)frames);
+        return TEST_FAIL;
+    }
+
+    memset(&nodes[0], 0, sizeof(nodes));
+    ok = gb32960_parse_frame_nodes(&bytes[offs[0]], lens[0], 1u, &nodes[0],
+                                   &count, 512u);
+    if ((ok != 1u) || (count == 0u)) {
+        printf("[FAIL] test_nodes: frame parse ok=%u count=%u\n",
+               (unsigned int)ok, (unsigned int)count);
+        return TEST_FAIL;
+    }
+    if ((nodes[0].flags & GB32960_NODE_FLAG_FRAME) == 0u) {
+        printf("[FAIL] test_nodes: frame flag missing on title node\n");
+        return TEST_FAIL;
+    }
+    if (nodes[0].depth != 0u) {
+        printf("[FAIL] test_nodes: title depth=%u\n", (unsigned int)nodes[0].depth);
+        return TEST_FAIL;
+    }
+    /* 逐节点校验: 深度不得超过前驱+1(树连续性) */
+    for (i = 1u; i < count; i++) {
+        if (nodes[i].depth > (uint8_t)(nodes[i - 1u].depth + 1u)) {
+            printf("[FAIL] test_nodes: depth jump at %u\n", (unsigned int)i);
+            return TEST_FAIL;
+        }
+        if ((nodes[i].flags & GB32960_NODE_FLAG_FRAME) != 0u) {
+            printf("[FAIL] test_nodes: unexpected frame flag at %u\n", (unsigned int)i);
+            return TEST_FAIL;
+        }
+    }
+    frame_nodes = count;
+
+    /* 追加第二帧(同帧重复解析): 帧标志应出现在追加段首 */
+    ok = gb32960_parse_frame_nodes(&bytes[offs[0]], lens[0], 2u, &nodes[0],
+                                   &count, 512u);
+    if ((ok != 1u) || (count <= frame_nodes)) {
+        printf("[FAIL] test_nodes: append ok=%u count=%u\n",
+               (unsigned int)ok, (unsigned int)count);
+        return TEST_FAIL;
+    }
+    if ((nodes[frame_nodes].flags & GB32960_NODE_FLAG_FRAME) == 0u) {
+        printf("[FAIL] test_nodes: appended frame flag missing\n");
+        return TEST_FAIL;
+    }
+
+    /* 文本物化: 内容等价(可检索到字段行) */
+    memset(&g_out[0], 0, sizeof(g_out));
+    gb32960_nodes_to_text(&nodes[0], count, &g_out[0], TEST_OUT_MAX);
+    if (wcsstr(&g_out[0], L"预留字段: 0xBEEF (2字节, 2016版)") == NULL) {
+        printf("[FAIL] test_nodes: text materialize missing reserved\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"第 2 帧") == NULL) {
+        printf("[FAIL] test_nodes: appended frame text missing\n");
+        return TEST_FAIL;
+    }
+
+    return TEST_PASS;
+}
+
+/**
  * @brief   测试入口
  * @param   无
  * @return  0: 全部通过; 1: 存在失败
@@ -383,6 +476,7 @@ int main(void)
     failed += test_login();
     failed += test_report();
     failed += test_errors();
+    failed += test_nodes();
 
     if (failed == 0) {
         printf("[PASS] all gb32960 tests passed\n");

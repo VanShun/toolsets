@@ -36,6 +36,7 @@ if exist res\app_res.o set RES_ARG=res\app_res.o
     entry.c ^
     tool_gb32960.c ^
     gb32960.c ^
+    gb_records.c ^
     framework\ui_common.c %RES_ARG% ^
     %LIBS%
 if errorlevel 1 (

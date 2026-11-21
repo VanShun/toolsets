@@ -45,6 +45,7 @@ rem --- To add a tool: append its module sources to the list below ---
     tools\dbgterm\dbg_conf.c ^
     tools\gb32960\tool_gb32960.c ^
     tools\gb32960\gb32960.c ^
+    tools\gb32960\gb_records.c ^
     tools\dbgterm\adb_core.c ^
     tools\dbgterm\dbg_source.c ^
     tools\dbgterm\dbg_frame.c ^

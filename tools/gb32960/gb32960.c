@@ -26,13 +26,13 @@
 /*  内部类型                                                                    */
 /* -------------------------------------------------------------------------- */
 
-/** 输出上下文 */
+/** 输出上下文(节点树写口) */
 typedef struct GB_OUT_TAG
 {
-    wchar_t *p_buf;     /**< 输出缓冲 */
-    uint32_t cap;       /**< 容量 */
-    uint32_t pos;       /**< 写位置 */
-    uint32_t frames;    /**< 成功帧计数 */
+    GB32960_NODE_T *p_nodes;    /**< 节点数组 */
+    uint32_t cap;               /**< 容量 */
+    uint32_t count;             /**< 已写节点数 */
+    uint32_t frames;            /**< 成功帧计数 */
 } GB_OUT_T;
 
 /** 解析游标(带边界保护) */
@@ -42,46 +42,53 @@ typedef struct GB_CUR_TAG
     uint32_t len;           /**< 总长 */
     uint32_t off;           /**< 当前偏移 */
     uint8_t truncated;      /**< 截断标志 */
+    uint8_t ver2016;        /**< 1=2016版(2323起始); 0=2025版 */
 } GB_CUR_T;
+
+/* -------------------------------------------------------------------------- */
+/*  模块内部全局变量                                                           */
+/* -------------------------------------------------------------------------- */
+
+/* 兼容文本接口的内部节点/字节缓冲(单线程UI调用, 非线程安全) */
+static GB32960_NODE_T g_gb_nodes[GB32960_NODE_MAX];    /**< 文本接口节点缓冲 */
+static uint8_t g_gb_bytes[GB32960_FRAME_MAX];          /**< 文本接口字节缓冲 */
 
 /* -------------------------------------------------------------------------- */
 /*  内部私有函数: 输出辅助                                                     */
 /* -------------------------------------------------------------------------- */
 
 /**
- * @brief   追加宽字符串到输出
+ * @brief   追加一个结果节点(深度+行文本; 容量满则静默截断)
  * @param   p_ctx  输出上下文
- * @param   p_text 文本
- * @return  无
- */
-static void out_str(GB_OUT_T *p_ctx, const wchar_t *p_text)
-{
-    uint32_t len = (uint32_t)lstrlenW(p_text);
-
-    if ((p_ctx->pos + len + 1u) >= p_ctx->cap) {
-        return;
-    }
-    memcpy(&p_ctx->p_buf[p_ctx->pos], p_text, len * sizeof(wchar_t));
-    p_ctx->pos += len;
-    p_ctx->p_buf[p_ctx->pos] = L'\0';
-}
-
-/**
- * @brief   追加缩进 + 文本行(带CRLF)
- * @param   p_ctx  输出上下文
- * @param   indent 缩进层级(0=根)
+ * @param   indent 树深度/缩进层级(0=根)
  * @param   p_text 行文本(已格式化)
  * @return  无
  */
 static void out_line(GB_OUT_T *p_ctx, uint32_t indent, const wchar_t *p_text)
 {
-    uint32_t i = 0u;
+    GB32960_NODE_T *p_node = NULL;
 
-    for (i = 0u; i < indent; i++) {
-        out_str(p_ctx, L"  ");
+    if (p_ctx->count >= p_ctx->cap) {
+        return;   /* 节点容量满: 截断 */
     }
-    out_str(p_ctx, p_text);
-    out_str(p_ctx, L"\r\n");
+    p_node = &p_ctx->p_nodes[p_ctx->count];
+    memset(p_node, 0, sizeof(GB32960_NODE_T));
+    p_node->depth = (uint8_t)((indent > 255u) ? 255u : indent);
+    p_node->flags = 0u;
+    (void)lstrcpynW(&p_node->text[0], p_text, (int)GB32960_NODE_TEXT_WCHAR);
+    p_ctx->count++;
+}
+
+/**
+ * @brief   把刚写入的节点标记为帧标题行(记录切分依据)
+ * @param   p_ctx 输出上下文
+ * @return  无
+ */
+static void out_mark_frame(GB_OUT_T *p_ctx)
+{
+    if ((p_ctx->count > 0u) && (p_ctx->count <= p_ctx->cap)) {
+        p_ctx->p_nodes[p_ctx->count - 1u].flags |= GB32960_NODE_FLAG_FRAME;
+    }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -501,8 +508,15 @@ static void parse_vehicle(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
     out_line(p_ctx, indent, line);
     (void)wsprintfW(line, L"挡位: 0x%02X", (unsigned int)gear);
     out_line(p_ctx, indent, line);
-    fmt_word(line, L"绝缘电阻", ins_res, 1, 0, 0, L"kΩ");
+    fmt_word(line, L"绝缘电阻", ins_res, 1000, 0, 0, L"kΩ");
     out_line(p_ctx, indent, line);
+    if (p_cur->ver2016 != 0u) {
+        /* 2016版: 绝缘电阻后还有2字节预留字段(未消费会使其后信息体错位) */
+        uint16_t reserved = rd_u16(p_cur);
+
+        (void)wsprintfW(line, L"预留字段: 0x%04X (2字节, 2016版)", (unsigned int)reserved);
+        out_line(p_ctx, indent, line);
+    }
 }
 
 /**
@@ -1067,6 +1081,7 @@ static uint8_t parse_frame(const uint8_t *p_frame, uint32_t frame_len,
     (void)wsprintfW(line, L"══ 第 %u 帧 (%u字节) ══", (unsigned int)frame_idx,
                     (unsigned int)frame_len);
     out_line(p_ctx, 0u, line);
+    out_mark_frame(p_ctx);
 
     if ((p_frame[0] == 0x23u) && (p_frame[1] == 0x23u)) {
         out_line(p_ctx, 1u, L"起始符: 0x2323 (## / 2016版)");
@@ -1130,6 +1145,7 @@ static uint8_t parse_frame(const uint8_t *p_frame, uint32_t frame_len,
         cur.len = (uint32_t)data_len;
         cur.off = 0u;
         cur.truncated = 0u;
+        cur.ver2016 = ((p_frame[0] == 0x23u) && (p_frame[1] == 0x23u)) ? 1u : 0u;
         parse_data_unit(&cur, p_ctx, cmd, resp);
         if (cur.truncated != 0u) {
             out_line(p_ctx, 1u, L"⚠ 数据单元不完整(部分字段缺失)");
@@ -1143,27 +1159,31 @@ static uint8_t parse_frame(const uint8_t *p_frame, uint32_t frame_len,
 /*  外部函数                                                                   */
 /* -------------------------------------------------------------------------- */
 
-uint32_t gb32960_parse_text(const wchar_t *p_hex_text, wchar_t *p_out, uint32_t out_cap)
+
+const wchar_t *gb32960_cmd_desc(uint8_t cmd)
 {
-    GB_OUT_T ctx;
-    uint8_t frame[GB32960_FRAME_MAX];
+    return cmd_desc(cmd);
+}
+
+uint32_t gb32960_decode_split(const wchar_t *p_hex_text, uint8_t *p_bytes, uint32_t bytes_cap,
+                              uint32_t *p_offs, uint32_t *p_lens, uint32_t frame_cap,
+                              wchar_t *p_err, uint32_t err_cap)
+{
     uint32_t byte_cnt = 0u;
-    uint32_t frame_start = 0u;
-    uint32_t frame_idx = 0u;
-    uint32_t ok_frames = 0u;
     uint32_t text_len = 0u;
     uint32_t hex_pos = 0u;
+    uint32_t frame_start = 0u;
+    uint32_t frame_cnt = 0u;
+    uint32_t i = 0u;
     uint8_t hi = 0u;
     uint8_t have_hi = 0u;
-    uint32_t i = 0u;
 
-    if ((p_hex_text == NULL) || (p_out == NULL) || (out_cap < 64u)) {
+    if ((p_hex_text == NULL) || (p_bytes == NULL) || (p_offs == NULL) || (p_lens == NULL)) {
         return 0u;
     }
-    memset(&ctx, 0, sizeof(ctx));
-    ctx.p_buf = p_out;
-    ctx.cap = out_cap;
-    p_out[0] = L'\0';
+    if (p_err != NULL) {
+        p_err[0] = L'\0';
+    }
     text_len = (uint32_t)lstrlenW(p_hex_text);
 
     /* hex文本 -> 字节流(容错: 忽略空白/逗号/冒号/分号, 0x前缀) */
@@ -1192,8 +1212,8 @@ uint32_t gb32960_parse_text(const wchar_t *p_hex_text, wchar_t *p_out, uint32_t 
                 hi = val;
                 have_hi = 1u;
             } else {
-                if (byte_cnt < GB32960_FRAME_MAX) {
-                    frame[byte_cnt] = (uint8_t)((hi << 4) | val);
+                if (byte_cnt < bytes_cap) {
+                    p_bytes[byte_cnt] = (uint8_t)((hi << 4) | val);
                 }
                 byte_cnt++;
                 have_hi = 0u;
@@ -1201,64 +1221,165 @@ uint32_t gb32960_parse_text(const wchar_t *p_hex_text, wchar_t *p_out, uint32_t 
         }
     }
     if (have_hi != 0u) {
-        if (byte_cnt < GB32960_FRAME_MAX) {
-            frame[byte_cnt] = (uint8_t)(hi << 4);
+        if (byte_cnt < bytes_cap) {
+            p_bytes[byte_cnt] = (uint8_t)(hi << 4);
         }
         byte_cnt++;
     }
-    if (byte_cnt > GB32960_FRAME_MAX) {
-        (void)wsprintfW(p_out, L"✗ 输入过长: %u 字节 (上限 %u 字节)",
-                        (unsigned int)byte_cnt, (unsigned int)GB32960_FRAME_MAX);
+    if (byte_cnt > bytes_cap) {
+        if (p_err != NULL) {
+            (void)wsprintfW(p_err, L"✗ 输入过长: %u 字节 (上限 %u 字节)",
+                            (unsigned int)byte_cnt, (unsigned int)bytes_cap);
+        }
         return 0u;
     }
     if (byte_cnt < 26u) {
-        (void)wsprintfW(p_out, L"✗ 数据过短: %u 字节 (最小26字节)",
-                        (unsigned int)byte_cnt);
+        if (p_err != NULL) {
+            (void)wsprintfW(p_err, L"✗ 数据过短: %u 字节 (最小26字节)",
+                            (unsigned int)byte_cnt);
+        }
         return 0u;
     }
 
     /* 自动定位首个起始符(跳过前置噪声) */
     frame_start = 0u;
     while (((frame_start + 1u) < byte_cnt) &&
-           !(((frame[frame_start] == 0x23u) && (frame[frame_start + 1u] == 0x23u)) ||
-             ((frame[frame_start] == 0x24u) && (frame[frame_start + 1u] == 0x24u)))) {
+           !(((p_bytes[frame_start] == 0x23u) && (p_bytes[frame_start + 1] == 0x23u)) ||
+             ((p_bytes[frame_start] == 0x24u) && (p_bytes[frame_start + 1] == 0x24u)))) {
         frame_start++;
     }
     if ((frame_start + 26u) > byte_cnt) {
-        (void)lstrcpynW(p_out, L"✗ 未找到有效起始符(2323/2424)", (int)out_cap);
+        if (p_err != NULL) {
+            (void)lstrcpynW(p_err, L"✗ 未找到有效起始符(2323/2424)", (int)err_cap);
+        }
         return 0u;
     }
 
-    /* 多帧连报: 逐帧切分解析 */
+    /* 多帧连报: 按帧头+长度切分(不校验BCC, 解析时校验) */
     i = frame_start;
     while ((i + 26u) <= byte_cnt) {
-        uint16_t dlen = (uint16_t)(((uint32_t)frame[i + 22u] << 8) |
-                                   (uint32_t)frame[i + 23u]);
+        uint16_t dlen = (uint16_t)(((uint32_t)p_bytes[i + 22u] << 8) |
+                                   (uint32_t)p_bytes[i + 23u]);
         uint32_t flen = GB_HDR_LEN + (uint32_t)dlen + 1u;
 
         if ((i + flen) > byte_cnt) {
-            wchar_t line[GB_LINE_MAX];
-
-            frame_idx++;
-            (void)wsprintfW(line, L"══ 第 %u 帧 (不完整) ══", (unsigned int)frame_idx);
-            out_line(&ctx, 0u, line);
-            (void)wsprintfW(line, L"✗ 需 %u 字节, 剩余 %u 字节",
-                            (unsigned int)flen, (unsigned int)(byte_cnt - i));
-            out_line(&ctx, 1u, line);
-            break;
+            break;   /* 尾部不完整帧: 忽略(解析报告由单帧接口生成) */
         }
-        frame_idx++;
-        if (parse_frame(&frame[i], flen, frame_idx, &ctx) != 0u) {
-            ok_frames++;
-            out_str(&ctx, L"\r\n");
-            i += flen;
-        } else {
-            out_str(&ctx, L"\r\n");
-            break;   /* 帧错误后停止切分(后续边界不可信) */
+        if (frame_cnt >= frame_cap) {
+            break;   /* 帧数达数组容量 */
         }
+        p_offs[frame_cnt] = i;
+        p_lens[frame_cnt] = flen;
+        frame_cnt++;
+        i += flen;
     }
-    if (frame_idx == 0u) {
-        (void)lstrcpynW(p_out, L"✗ 无可解析的完整帧", (int)out_cap);
+    if (frame_cnt == 0u) {
+        if (p_err != NULL) {
+            (void)lstrcpynW(p_err, L"✗ 无可解析的完整帧", (int)err_cap);
+        }
+        return 0u;
+    }
+
+    return frame_cnt;
+}
+
+uint32_t gb32960_parse_frame_nodes(const uint8_t *p_frame, uint32_t frame_len,
+                                   uint32_t frame_idx, GB32960_NODE_T *p_nodes,
+                                   uint32_t *p_count, uint32_t node_cap)
+{
+    GB_OUT_T ctx;
+    uint8_t ret = 0u;
+
+    if ((p_frame == NULL) || (p_nodes == NULL) || (p_count == NULL) ||
+        (frame_len < 26u) || (*p_count >= node_cap)) {
+        return 0u;
+    }
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.p_nodes = p_nodes;
+    ctx.cap = node_cap;
+    ctx.count = *p_count;
+    ret = parse_frame(p_frame, frame_len, frame_idx, &ctx);
+    *p_count = ctx.count;
+
+    return (uint32_t)ret;
+}
+
+void gb32960_nodes_to_text(const GB32960_NODE_T *p_nodes, uint32_t count,
+                           wchar_t *p_out, uint32_t out_cap)
+{
+    uint32_t i = 0u;
+    uint32_t pos = 0u;
+
+    if ((p_nodes == NULL) || (p_out == NULL) || (out_cap < 2u)) {
+        return;
+    }
+    p_out[0] = L'\0';
+
+    for (i = 0u; i < count; i++) {
+        const GB32960_NODE_T *p_node = &p_nodes[i];
+        uint32_t k = 0u;
+        uint32_t text_len = (uint32_t)lstrlenW(&p_node->text[0]);
+        uint32_t need = ((uint32_t)p_node->depth * 2u) + text_len + 2u;
+        uint8_t frame_head = (((p_node->flags & GB32960_NODE_FLAG_FRAME) != 0u) &&
+                              (i > 0u)) ? 1u : 0u;
+
+        if (frame_head != 0u) {
+            need += 2u;   /* 帧间空行 */
+        }
+        if ((pos + need + 1u) >= out_cap) {
+            break;   /* 输出容量不足: 截断 */
+        }
+        if (frame_head != 0u) {
+            p_out[pos] = L'\r';
+            p_out[pos + 1u] = L'\n';
+            pos += 2u;
+        }
+        for (k = 0u; k < (uint32_t)p_node->depth; k++) {
+            p_out[pos] = L' ';
+            p_out[pos + 1u] = L' ';
+            pos += 2u;
+        }
+        memcpy(&p_out[pos], &p_node->text[0], text_len * sizeof(wchar_t));
+        pos += text_len;
+        p_out[pos] = L'\r';
+        p_out[pos + 1u] = L'\n';
+        pos += 2u;
+        p_out[pos] = L'\0';
+    }
+}
+
+uint32_t gb32960_parse_text(const wchar_t *p_hex_text, wchar_t *p_out, uint32_t out_cap)
+{
+    uint32_t offs[GB32960_FRAME_LIST_MAX];
+    uint32_t lens[GB32960_FRAME_LIST_MAX];
+    uint32_t frames = 0u;
+    uint32_t count = 0u;
+    uint32_t ok_frames = 0u;
+    uint32_t i = 0u;
+    wchar_t err[160];
+
+    if ((p_hex_text == NULL) || (p_out == NULL) || (out_cap < 64u)) {
+        return 0u;
+    }
+    memset(&offs[0], 0, sizeof(offs));
+    memset(&lens[0], 0, sizeof(lens));
+    memset(&err[0], 0, sizeof(err));
+
+    frames = gb32960_decode_split(p_hex_text, &g_gb_bytes[0], GB32960_FRAME_MAX,
+                                  &offs[0], &lens[0], GB32960_FRAME_LIST_MAX,
+                                  &err[0], (uint32_t)(sizeof(err) / sizeof(err[0])));
+    if (frames == 0u) {
+        (void)lstrcpynW(p_out, (err[0] != L'\0') ? &err[0] : L"✗ 解析失败", (int)out_cap);
+        return 0u;
+    }
+
+    for (i = 0u; i < frames; i++) {
+        ok_frames += gb32960_parse_frame_nodes(&g_gb_bytes[offs[i]], lens[i], (i + 1u),
+                                               &g_gb_nodes[0], &count, GB32960_NODE_MAX);
+    }
+    gb32960_nodes_to_text(&g_gb_nodes[0], count, p_out, out_cap);
+    if (count == 0u) {
+        (void)lstrcpynW(p_out, L"✗ 解析失败", (int)out_cap);
         return 0u;
     }
 
