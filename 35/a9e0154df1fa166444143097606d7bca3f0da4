@@ -1,0 +1,51 @@
+tools/dbgterm/proto_cap.h
+  s_6ec8c668b5ee1e::t_fb0c55f095ac6a 6-12
+  s_6ec8c668b5ee1e::t_3fc98bad5389d1 70-85
+tools/dbgterm/proto_cap.c
+  s_6ec8c668b5ee1e::t_115cf814aac81e 6-11,19-24,58,60-61,63,66,68-79,81-89,98-101,103,108-109,111-119,128-133,135-136,140,143-145,153-156,158,160-161,163,181-184,193-199,203,215,217-218,220-227,236,238,240-241,243-251
+  s_6ec8c668b5ee1e::t_7f1c41e9a53e59 256-273
+CHANGELOG.md
+  s_6ec8c668b5ee1e::t_f7a57c27cb1037 5-22
+version.h
+  s_6ec8c668b5ee1e::t_e026b8374eeaff 18,21-22
+tools/dbgterm/tool_dbgterm.c
+  s_6ec8c668b5ee1e::t_20c0ab29f19a28 1232-1236
+tools/dbgterm/proto_view.c
+  s_6ec8c668b5ee1e::t_9bdf60aa5dd97e 651-677
+  s_6ec8c668b5ee1e::t_96df4862dbfdd1 980-989
+  s_6ec8c668b5ee1e::t_be1f0ca672de1b 1163,1169-1185,1187
+  s_6ec8c668b5ee1e::t_a0e717d5bb25c9 487
+  s_6ec8c668b5ee1e::t_cd90af55f98bc6 511,513-522
+  s_6ec8c668b5ee1e::t_95a447e2fd7147 350,359,361-382,385-391,414-415,418-421
+  s_6ec8c668b5ee1e::t_262316a987f5c6 392-393
+  s_6ec8c668b5ee1e::t_f4611fed09bea6 769
+  s_6ec8c668b5ee1e::t_20e916a4a358c0 112-115,118-158
+  s_6ec8c668b5ee1e::t_66e13467e815ac 449
+  s_6ec8c668b5ee1e::t_559fcee40b7ca9 67-89
+  s_6ec8c668b5ee1e::t_653b0eb1be303a 179
+  s_6ec8c668b5ee1e::t_77f1760c84c51a 159
+  s_6ec8c668b5ee1e::t_64b34c9a07e37b 1186
+  s_6ec8c668b5ee1e::t_52f80d6e5388fa 1188-1189
+tools/dbgterm/tests/test_proto_cap.c
+  s_6ec8c668b5ee1e::t_0fae16e020080d 172-206,217-218,220-237,243,245,253,266
+  s_6ec8c668b5ee1e::t_384872b7960a67 6-7,29-31,33,105,109,122-124,129,207-208,212,241,246-252,254-264,283,285
+tools/dbgterm/proto_view.h
+  s_6ec8c668b5ee1e::t_20c4686ae9440b 60,65-70
+  s_6ec8c668b5ee1e::t_2a994a061a07c4 71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "35a9e0154df1fa166444143097606d7bca3f0da4",
+  "prompts": {},
+  "sessions": {
+    "s_6ec8c668b5ee1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4634b95e-8dd0-451c-9050-4e05c2830dcb",
+        "model": "glm-5.3"
+      },
+      "human_author": "herongshun <herongshun@yaxon.com>"
+    }
+  }
+}
