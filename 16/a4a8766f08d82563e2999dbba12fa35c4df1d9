@@ -1,0 +1,23 @@
+CHANGELOG.md
+  s_6ec8c668b5ee1e::t_705f327a67783b 5-12
+tools/gb32960/tool_gb32960.c
+  s_6ec8c668b5ee1e::t_5b27ea5226bc20 119-120,123
+version.h
+  s_6ec8c668b5ee1e::t_e98aeb19dbbd22 18,21-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "16a4a8766f08d82563e2999dbba12fa35c4df1d9",
+  "prompts": {},
+  "sessions": {
+    "s_6ec8c668b5ee1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4634b95e-8dd0-451c-9050-4e05c2830dcb",
+        "model": "glm-5.3"
+      },
+      "human_author": "herongshun <herongshun@yaxon.com>"
+    }
+  }
+}
