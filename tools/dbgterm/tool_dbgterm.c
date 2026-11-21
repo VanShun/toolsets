@@ -20,6 +20,7 @@
 #include "dbg_filter.h"
 #include "filter_view.h"
 #include "color_view.h"
+#include "proto_view.h"
 #include "dbg_conf.h"
 #include "dbg_save.h"
 #include "version.h"
@@ -45,6 +46,7 @@
 #define TOOL_DBG_MID_FILTERWIN     3012u  /**< 视图-过滤窗口(独立) */
 #define TOOL_DBG_MID_STRIPDEV      3016u  /**< 视图-精简设备时间戳 */
 #define TOOL_DBG_MID_COLORWIN      3017u  /**< 视图-多彩关键字(独立配置窗) */
+#define TOOL_DBG_MID_PROTO         3018u  /**< 扩展-协议解析(独立窗口) */
 #define TOOL_DBG_MID_ABOUT         3011u  /**< 帮助-关于 */
 #define TOOL_DBG_MID_SAVE_NOW      3013u  /**< 文件-立即保存 */
 #define TOOL_DBG_MID_AUTOSAVE      3014u  /**< 文件-自动保存到文件 */
@@ -368,6 +370,13 @@ static void tool_create_menu(HWND hwnd)
     (void)AppendMenuW(h_menu, MF_POPUP, (UINT_PTR)h_file, L"文件(&F)");
     (void)AppendMenuW(h_menu, MF_POPUP, (UINT_PTR)h_conn, L"连接(&C)");
     (void)AppendMenuW(h_menu, MF_POPUP, (UINT_PTR)h_view, L"视图(&V)");
+    /* 扩展菜单: 协议解析等扩展功能 */
+    {
+        HMENU h_ext = CreatePopupMenu();
+
+        (void)AppendMenuW(h_ext, MF_STRING, (UINT_PTR)TOOL_DBG_MID_PROTO, L"协议解析…");
+        (void)AppendMenuW(h_menu, MF_POPUP, (UINT_PTR)h_ext, L"扩展(&X)");
+    }
     (void)AppendMenuW(h_menu, MF_POPUP, (UINT_PTR)h_help, L"帮助(&H)");
     (void)SetMenu(hwnd, h_menu);
 }
@@ -1159,6 +1168,11 @@ static void tool_handle_line(HWND hwnd, const wchar_t *p_line)
     if ((ret == (uint32_t)DBG_FILTER_RET_HIT) && (filter_view_is_open() != 0u)) {
         filter_view_append_hit(p_line, group_idx);
     }
+
+    /* 协议解析窗口: 显示行流喂入捕获状态机 */
+    if (proto_view_is_open() != 0u) {
+        proto_view_feed(p_line);
+    }
 }
 
 /**
@@ -1723,6 +1737,11 @@ static LRESULT CALLBACK tool_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                         } else {
                             color_view_open(g_tool_instance, hwnd);
                         }
+                        break;
+                    }
+                    case TOOL_DBG_MID_PROTO:
+                    {
+                        proto_view_open(g_tool_instance, hwnd);
                         break;
                     }
                     case TOOL_DBG_MID_STRIPDEV:

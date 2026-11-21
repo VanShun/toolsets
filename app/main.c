@@ -14,6 +14,7 @@
 #include "ui_menu.h"
 #include "version.h"
 #include "updater.h"
+#include "proto_link.h"
 
 /* -------------------------------------------------------------------------- */
 /*  宏定义                                                                     */
@@ -122,6 +123,7 @@ int WINAPI WinMain(HINSTANCE h_inst, HINSTANCE h_prev, char *p_cmd_line, int cmd
     if ((p_table == NULL) || (count == 0u)) {
         return 1;
     }
+    proto_link_init();   /* 注册协议解析器到dbgterm扩展窗口(合集版) */
     if (count > UI_MENU_ITEM_MAX) {
         count = UI_MENU_ITEM_MAX;
     }

@@ -38,6 +38,8 @@ if exist res\app_res.o set RES_ARG=res\app_res.o
     adb_dlg.c ^
     filter_view.c ^
     color_view.c ^
+    proto_cap.c ^
+    proto_view.c ^
     dbg_save.c ^
     dbg_conf.c ^
     adb_core.c ^
@@ -81,6 +83,16 @@ if errorlevel 1 (
 %OUT%\test_adb_core.exe
 if errorlevel 1 (
     echo [ERROR] test_adb_core failed.
+    exit /b 1
+)
+%CC% %CFLAGS% -I. -o %OUT%\test_proto_cap.exe tests\test_proto_cap.c proto_cap.c -luser32
+if errorlevel 1 (
+    echo [ERROR] test_proto_cap build failed.
+    exit /b 1
+)
+%OUT%\test_proto_cap.exe
+if errorlevel 1 (
+    echo [ERROR] test_proto_cap failed.
     exit /b 1
 )
 

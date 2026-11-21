@@ -29,7 +29,7 @@ if errorlevel 1 (
 
 echo [2/4] building application ...
 rem --- To add a tool: append its module sources to the list below ---
-%CC% %CFLAGS% -mwindows -I. -I%SRC_APP% -I%SRC_FW% -o %OUT%\toolsets.exe ^
+%CC% %CFLAGS% -mwindows -I. -I%SRC_APP% -I%SRC_FW% -Itools\dbgterm -Itools\gb32960 -o %OUT%\toolsets.exe ^
     %SRC_APP%\main.c ^
     %SRC_APP%\tool_manifest.c ^
     %SRC_APP%\updater.c ^
@@ -41,11 +41,14 @@ rem --- To add a tool: append its module sources to the list below ---
     tools\dbgterm\adb_dlg.c ^
     tools\dbgterm\filter_view.c ^
     tools\dbgterm\color_view.c ^
+    tools\dbgterm\proto_cap.c ^
+    tools\dbgterm\proto_view.c ^
     tools\dbgterm\dbg_save.c ^
     tools\dbgterm\dbg_conf.c ^
     tools\gb32960\tool_gb32960.c ^
     tools\gb32960\gb32960.c ^
     tools\gb32960\gb_records.c ^
+    app\proto_link.c ^
     tools\dbgterm\adb_core.c ^
     tools\dbgterm\dbg_source.c ^
     tools\dbgterm\dbg_frame.c ^
