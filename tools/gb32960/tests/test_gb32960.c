@@ -181,7 +181,8 @@ static uint32_t build_report(wchar_t *p_hex)
     put8(buf, &pos, 0x01u);        /* DC-DC 工作 */
     put8(buf, &pos, 0x0Eu);        /* 自动D挡 */
     put16(buf, &pos, 3000u);       /* 绝缘 3000kΩ */
-    put16(buf, &pos, 0xBEEFu);     /* 2016版: 绝缘后2字节预留字段 */
+    put8(buf, &pos, 35u);          /* 2016修改单: 加速踏板行程 35% */
+    put8(buf, &pos, 0x65u);        /* 2016修改单: 制动踏板有效(0x65) */
 
     /* 位置数据(2016表14: 无坐标系字节) */
     put8(buf, &pos, 0x05u);
@@ -291,8 +292,12 @@ static int32_t test_report(void)
         printf("[FAIL] test_report: insulation wrong\n");
         return TEST_FAIL;
     }
-    if (wcsstr(&g_out[0], L"预留字段: 0xBEEF (2字节, 2016版)") == NULL) {
-        printf("[FAIL] test_report: 2016 reserved field missing\n");
+    if (wcsstr(&g_out[0], L"加速踏板行程值: 35%") == NULL) {
+        printf("[FAIL] test_report: 2016 accelerator pedal missing\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"制动踏板状态: 有效(0x65)") == NULL) {
+        printf("[FAIL] test_report: 2016 brake pedal missing\n");
         return TEST_FAIL;
     }
 
@@ -435,12 +440,35 @@ static uint32_t build_report_2016_full(wchar_t *p_hex)
     /* 报警数据(2016表17: 无2025的通用报警N5尾段) */
     put8(buf, &pos, 0x07u);
     put8(buf, &pos, 1u);           /* 等级1 */
-    put32(buf, &pos, 0x00001830u); /* bit4(SOC低)+bit11(绝缘)+bit12(DC-DC温度) */
+    put32(buf, &pos, 0x00001830u); /* bit4+bit5+bit11+bit12 */
     put8(buf, &pos, 1u);           /* 储能故障数 */
     put32(buf, &pos, 0x12345678u);
     put8(buf, &pos, 0u);           /* 电机故障数 */
     put8(buf, &pos, 0u);           /* 发动机故障数 */
     put8(buf, &pos, 0u);           /* 其他故障数 */
+
+    /* 可充电储能装置电压数据(2016修改单 0x08, 表B.5/B.6) */
+    put8(buf, &pos, 0x08u);
+    put8(buf, &pos, 1u);           /* 子系统个数 */
+    put8(buf, &pos, 3u);           /* 子系统号 */
+    put16(buf, &pos, 3500u);       /* 装置电压 350.0V */
+    put16(buf, &pos, 10500u);      /* 装置电流 50.0A(偏移1000A) */
+    put16(buf, &pos, 96u);         /* 单体电池总数 */
+    put16(buf, &pos, 1u);          /* 本帧起始电池序号 */
+    put8(buf, &pos, 3u);           /* 本帧单体电池总数 m=3 */
+    put16(buf, &pos, 3650u);       /* 3.650V */
+    put16(buf, &pos, 3600u);       /* 3.600V */
+    put16(buf, &pos, 0xFFFFu);     /* 无效 */
+
+    /* 可充电储能装置温度数据(2016修改单 0x09, 表B.7/B.8) */
+    put8(buf, &pos, 0x09u);
+    put8(buf, &pos, 1u);           /* 子系统个数 */
+    put8(buf, &pos, 3u);           /* 子系统号 */
+    put16(buf, &pos, 4u);          /* 探针个数 */
+    put8(buf, &pos, 85u);          /* 45℃ */
+    put8(buf, &pos, 80u);          /* 40℃ */
+    put8(buf, &pos, 75u);          /* 35℃ */
+    put8(buf, &pos, 0xFEu);        /* 异常 */
 
     data_len = pos - 24u;
     finish_frame(buf, &pos, data_len);
@@ -516,6 +544,38 @@ static int32_t test_report_2016_full(void)
     }
     if (wcsstr(&g_out[0], L"坐标系") != NULL) {
         printf("[FAIL] test_2016_full: 2025-only coord field present in 2016\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"◆ 可充电储能装置电压数据 (0x08)") == NULL) {
+        printf("[FAIL] test_2016_full: battery voltage header missing\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"可充电储能装置电压: 3500 (0x0DAC) = 350.0 V") == NULL) {
+        printf("[FAIL] test_2016_full: subsystem voltage wrong\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"可充电储能装置电流: 10500 (0x2904) = 50.0 A") == NULL) {
+        printf("[FAIL] test_2016_full: subsystem current wrong\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"本帧起始电池序号: 1  本帧单体电池总数: 3") == NULL) {
+        printf("[FAIL] test_2016_full: frame split fields missing\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"3.650V 3.600V [无效]") == NULL) {
+        printf("[FAIL] test_2016_full: cell voltages wrong\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"◆ 可充电储能装置温度数据 (0x09)") == NULL) {
+        printf("[FAIL] test_2016_full: battery temp header missing\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"温度探针4个") == NULL) {
+        printf("[FAIL] test_2016_full: probe count missing\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"45℃ 40℃ 35℃ [异常]") == NULL) {
+        printf("[FAIL] test_2016_full: probe temps wrong\n");
         return TEST_FAIL;
     }
 
@@ -594,8 +654,8 @@ static int32_t test_nodes(void)
     /* 文本物化: 内容等价(可检索到字段行) */
     memset(&g_out[0], 0, sizeof(g_out));
     gb32960_nodes_to_text(&nodes[0], count, &g_out[0], TEST_OUT_MAX);
-    if (wcsstr(&g_out[0], L"预留字段: 0xBEEF (2字节, 2016版)") == NULL) {
-        printf("[FAIL] test_nodes: text materialize missing reserved\n");
+    if (wcsstr(&g_out[0], L"加速踏板行程值: 35%") == NULL) {
+        printf("[FAIL] test_nodes: text materialize missing pedal field\n");
         return TEST_FAIL;
     }
     if (wcsstr(&g_out[0], L"第 2 帧") == NULL) {

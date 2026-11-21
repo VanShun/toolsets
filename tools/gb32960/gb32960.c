@@ -516,11 +516,29 @@ static void parse_vehicle(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
     fmt_word(line, L"绝缘电阻", ins_res, 1000, 0, 0, L"kΩ");
     out_line(p_ctx, indent, line);
     if (p_cur->ver2016 != 0u) {
-        /* 2016版: 绝缘电阻后还有2字节预留字段(未消费会使其后信息体错位) */
-        uint16_t reserved = rd_u16(p_cur);
+        /* 2016修改单(表B.4): 绝缘电阻后为 加速踏板行程值1B + 制动踏板状态1B
+           (正文版表9为2字节预留, 布局等长兼容) */
+        uint8_t accel = rd_u8(p_cur);
+        uint8_t brake = rd_u8(p_cur);
 
-        (void)wsprintfW(line, L"预留字段: 0x%04X (2字节, 2016版)", (unsigned int)reserved);
-        out_line(p_ctx, indent, line);
+        if (accel == 0xFEu) {
+            out_line(p_ctx, indent, L"加速踏板行程值: 0xFE (异常)");
+        } else if (accel == 0xFFu) {
+            out_line(p_ctx, indent, L"加速踏板行程值: 0xFF (无效)");
+        } else {
+            (void)wsprintfW(line, L"加速踏板行程值: %u%%", (unsigned int)accel);
+            out_line(p_ctx, indent, line);
+        }
+        if (brake == 0x65u) {
+            out_line(p_ctx, indent, L"制动踏板状态: 有效(0x65)");
+        } else if (brake == 0xFEu) {
+            out_line(p_ctx, indent, L"制动踏板状态: 0xFE (异常)");
+        } else if (brake == 0xFFu) {
+            out_line(p_ctx, indent, L"制动踏板状态: 0xFF (无效)");
+        } else {
+            (void)wsprintfW(line, L"制动踏板状态: %u%%", (unsigned int)brake);
+            out_line(p_ctx, indent, line);
+        }
     }
 }
 
@@ -932,6 +950,127 @@ static void parse_extreme(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
 }
 
 /**
+ * @brief   解析可充电储能装置电压数据(2016修改单 0x08, 表B.5/B.6)
+ *          子系统个数1 + 每子系统: 子系统号1 装置电压2 装置电流2(偏移1000A)
+ *          单体电池总数2(WORD) 本帧起始电池序号2 本帧单体电池总数1(BYTE)
+ *          单体电池电压2×m(0.001V); 单体超200拆多帧传输
+ * @param   p_cur   游标
+ * @param   p_ctx   输出
+ * @param   indent  缩进
+ * @return  无
+ */
+static void parse_batt_volt16(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
+{
+    wchar_t line[GB_LINE_MAX];
+    uint8_t sub_n = rd_u8(p_cur);
+    uint32_t i = 0u;
+    uint32_t j = 0u;
+
+    (void)wsprintfW(line, L"可充电储能子系统个数: %u", (unsigned int)sub_n);
+    out_line(p_ctx, indent, line);
+    for (i = 0u; (i < sub_n) && (i < GB_LIST_MAX); i++) {
+        uint8_t sub_id = rd_u8(p_cur);
+        uint16_t volt = rd_u16(p_cur);
+        uint16_t curr = rd_u16(p_cur);
+        uint16_t total_n = rd_u16(p_cur);
+        uint16_t start_idx = rd_u16(p_cur);
+        uint8_t frame_n = rd_u8(p_cur);
+
+        (void)wsprintfW(line, L"— 子系统%u (序号%u) —",
+                        (unsigned int)(i + 1u), (unsigned int)sub_id);
+        out_line(p_ctx, indent, line);
+        fmt_word(line, L"可充电储能装置电压", volt, 100, 0, 1, L"V");
+        out_line(p_ctx, indent + 1u, line);
+        fmt_word(line, L"可充电储能装置电流", curr, 100, 10000, 1, L"A");
+        out_line(p_ctx, indent + 1u, line);
+        (void)wsprintfW(line, L"单体电池总数: %u", (unsigned int)total_n);
+        out_line(p_ctx, indent + 1u, line);
+        (void)wsprintfW(line, L"本帧起始电池序号: %u  本帧单体电池总数: %u",
+                        (unsigned int)start_idx, (unsigned int)frame_n);
+        out_line(p_ctx, indent + 1u, line);
+        {
+            wchar_t row[GB_LINE_MAX];
+            uint32_t col = 0u;
+
+            memset(&row[0], 0, sizeof(row));
+            for (j = 0u; (j < frame_n) && (j < (GB_LIST_MAX * 16u)); j++) {
+                uint16_t uv = rd_u16(p_cur);
+                wchar_t cell[24u];
+
+                if (uv == 0xFFFFu) {
+                    (void)wsprintfW(&cell[0], L"[无效] ");
+                } else if (uv == 0xFFFEu) {
+                    (void)wsprintfW(&cell[0], L"[异常] ");
+                } else {
+                    (void)wsprintfW(&cell[0], L"%u.%03uV ", (unsigned int)(uv / 1000u),
+                                    (unsigned int)(uv % 1000u));
+                }
+                (void)lstrcatW(&row[0], &cell[0]);
+                col++;
+                if ((col >= 8u) || ((j + 1u) == frame_n)) {
+                    out_line(p_ctx, indent + 2u, &row[0]);
+                    memset(&row[0], 0, sizeof(row));
+                    col = 0u;
+                }
+            }
+        }
+    }
+}
+
+/**
+ * @brief   解析可充电储能装置温度数据(2016修改单 0x09, 表B.7/B.8)
+ *          子系统个数1 + 每子系统: 子系统号1 探针个数2(WORD) 探针温度N×1B
+ * @param   p_cur   游标
+ * @param   p_ctx   输出
+ * @param   indent  缩进
+ * @return  无
+ */
+static void parse_batt_temp16(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
+{
+    wchar_t line[GB_LINE_MAX];
+    uint8_t sub_n = rd_u8(p_cur);
+    uint32_t i = 0u;
+    uint32_t j = 0u;
+
+    (void)wsprintfW(line, L"可充电储能子系统个数: %u", (unsigned int)sub_n);
+    out_line(p_ctx, indent, line);
+    for (i = 0u; (i < sub_n) && (i < GB_LIST_MAX); i++) {
+        uint8_t sub_id = rd_u8(p_cur);
+        uint16_t probe_n = rd_u16(p_cur);
+
+        (void)wsprintfW(line, L"— 子系统%u (序号%u) 温度探针%u个 —",
+                        (unsigned int)(i + 1u), (unsigned int)sub_id,
+                        (unsigned int)probe_n);
+        out_line(p_ctx, indent, line);
+        {
+            wchar_t row[GB_LINE_MAX];
+            uint32_t col = 0u;
+
+            memset(&row[0], 0, sizeof(row));
+            for (j = 0u; (j < probe_n) && (j < (GB_LIST_MAX * 16u)); j++) {
+                uint8_t t = rd_u8(p_cur);
+                wchar_t cell[20u];
+
+                if (t == 0xFFu) {
+                    (void)wsprintfW(&cell[0], L"[无效] ");
+                } else if (t == 0xFEu) {
+                    (void)wsprintfW(&cell[0], L"[异常] ");
+                } else {
+                    (void)wsprintfW(&cell[0], L"%d℃ ", (int32_t)((int32_t)t - 40));
+                }
+                (void)lstrcatW(&row[0], &cell[0]);
+                col++;
+                if ((col >= 10u) || ((j + 1u) == probe_n)) {
+                    out_line(p_ctx, indent + 1u, &row[0]);
+                    memset(&row[0], 0, sizeof(row));
+                    col = 0u;
+                }
+            }
+        }
+    }
+}
+
+/**
  * @brief   解析动力蓄电池电压数据(0x07)
  * @param   p_cur   游标
  * @param   p_ctx   输出
@@ -1057,8 +1196,8 @@ static const wchar_t *info_desc_v(uint8_t v, uint8_t ver2016)
         {
             case 0x06u: return L"极值数据";
             case 0x07u: return L"报警数据";
-            case 0x08u: return L"终端数据预留";
-            case 0x09u: return L"终端数据预留";
+            case 0x08u: return L"可充电储能装置电压数据";
+            case 0x09u: return L"可充电储能装置温度数据";
             default: break;
         }
     }
@@ -1085,6 +1224,8 @@ static void parse_info_body(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
             case 0x05u: parse_location(p_cur, p_ctx, indent + 1u); break;
             case 0x06u: parse_extreme(p_cur, p_ctx, indent + 1u); break;
             case 0x07u: parse_alarm(p_cur, p_ctx, indent + 1u); break;
+            case 0x08u: parse_batt_volt16(p_cur, p_ctx, indent + 1u); break;
+            case 0x09u: parse_batt_temp16(p_cur, p_ctx, indent + 1u); break;
             default:
             {
                 uint32_t remain = p_cur->len - p_cur->off;
@@ -1292,6 +1433,11 @@ static void parse_data_unit(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint8_t cmd, uint8
         case 0x07u:   /* 心跳: 数据单元为空 */
         {
             out_line(p_ctx, indent, L"(心跳, 数据单元为空)");
+            break;
+        }
+        case 0x08u:   /* 终端校时: 数据单元为6字节时间 */
+        {
+            out_time(p_cur, p_ctx, indent);
             break;
         }
         default:
