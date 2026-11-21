@@ -1,0 +1,35 @@
+tools/gb32960/gb32960.c
+  s_6ec8c668b5ee1e::t_388f8cc8571f1b 1199-1200
+  s_6ec8c668b5ee1e::t_148f32383ca662 519-541
+  s_6ec8c668b5ee1e::t_f7b2ea67c3f0e8 1438-1442
+  s_6ec8c668b5ee1e::t_a2a21d081a1278 952-1072
+  s_6ec8c668b5ee1e::t_416a65f5314ad6 1227-1228
+tools/gb32960/tests/test_gb32960.c
+  s_6ec8c668b5ee1e::t_bde6c16cfbb5b0 443,450-471
+  s_6ec8c668b5ee1e::t_4403e754d2b534 295-300
+  s_6ec8c668b5ee1e::t_ae33db38e4b542 185
+  s_6ec8c668b5ee1e::t_b21b768b85015d 549-580
+  s_6ec8c668b5ee1e::t_74ecbc6e6006b4 657-658
+  s_6ec8c668b5ee1e::t_5845c5596f3ea8 184
+  s_6ec8c668b5ee1e::t_cd45103573e6d9 472
+version.h
+  s_6ec8c668b5ee1e::t_9903d5c1d7454b 18,21-22
+CHANGELOG.md
+  s_6ec8c668b5ee1e::t_e911471f3f2f76 5-22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0a025137aa382186ce44e7fc01c009318975fec5",
+  "prompts": {},
+  "sessions": {
+    "s_6ec8c668b5ee1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4634b95e-8dd0-451c-9050-4e05c2830dcb",
+        "model": "glm-5.3"
+      },
+      "human_author": "herongshun <herongshun@yaxon.com>"
+    }
+  }
+}
