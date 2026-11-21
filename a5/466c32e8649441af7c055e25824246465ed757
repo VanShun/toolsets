@@ -1,0 +1,52 @@
+version.h
+  s_6ec8c668b5ee1e::t_42ad19ed128edb 17-18,21-22
+build.bat
+  s_6ec8c668b5ee1e::t_e4bf804bf978d4 44-45,51
+  s_6ec8c668b5ee1e::t_316a65968b60b0 32
+app/proto_link.h
+  s_6ec8c668b5ee1e::t_4517a75824dc03 1-23
+CHANGELOG.md
+  s_6ec8c668b5ee1e::t_1d33fb82dd35dc 5-25
+tools/dbgterm/proto_view.h
+  s_6ec8c668b5ee1e::t_5e754bfb015a15 1-73
+tools/dbgterm/build.bat
+  s_6ec8c668b5ee1e::t_4bcc8f98783951 41-42
+  s_6ec8c668b5ee1e::t_c48e5534ca0345 88-97
+tools/dbgterm/tests/test_proto_cap.c
+  s_6ec8c668b5ee1e::t_05441204ae03c8 1-143,145-224
+  s_6ec8c668b5ee1e::t_227ff97242d4cc 144
+app/proto_link.c
+  s_6ec8c668b5ee1e::t_baadc2f5cd8b1b 1-60
+tools/dbgterm/proto_view.c
+  s_6ec8c668b5ee1e::t_057939bbc48730 169-170,177-179,181-183
+  s_6ec8c668b5ee1e::t_64e6a92d110b53 1-168,171-176,180,184-1062
+app/main.c
+  s_6ec8c668b5ee1e::t_37df221a0f3080 126
+  s_6ec8c668b5ee1e::t_5930b73fccc728 17
+tools/dbgterm/tool_dbgterm.c
+  s_6ec8c668b5ee1e::t_cd713d38a96a3a 49
+  s_6ec8c668b5ee1e::t_a44394020643b6 23
+  s_6ec8c668b5ee1e::t_0f53c8431274f5 373-379
+  s_6ec8c668b5ee1e::t_0670be8bff263f 1171-1175
+  s_6ec8c668b5ee1e::t_7a5368d234bd26 1742-1746
+tools/dbgterm/proto_cap.h
+  s_6ec8c668b5ee1e::t_9997c1c1cedabf 1-67
+tools/dbgterm/proto_cap.c
+  s_6ec8c668b5ee1e::t_0e6361c0ab6228 1-277
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a5466c32e8649441af7c055e25824246465ed757",
+  "prompts": {},
+  "sessions": {
+    "s_6ec8c668b5ee1e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4634b95e-8dd0-451c-9050-4e05c2830dcb",
+        "model": "glm-5.3"
+      },
+      "human_author": "herongshun <herongshun@yaxon.com>"
+    }
+  }
+}
