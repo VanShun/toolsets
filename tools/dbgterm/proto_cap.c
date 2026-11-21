@@ -3,15 +3,24 @@
  * @author  herongshun
  * @date    2026-11-21
  * @brief   协议行捕获实现
- *          匹配算法: 把行内全部hex字符(0-9A-Fa-f)抽出为"去空格串"并记录原行
- *          位置, 关键字同样去空格后小写化, 在去空格串中查找; 命中位置映射回
- *          原行起始点, 从该点起两两组字节(非hex字符跳过)
+ *          提取算法: 行按空白切token, 仅接受"2位纯hex"token(空格分隔的
+ *          hex dump, 如 "23 23 02 FE")——logcat前缀(I/yaxon ( 2035):、
+ *          [2026/11/21 17:07:56.717113 INFO]:、c:0623]:等)与空行时间戳
+ *          均不满足该形态, 天然不混入;
+ *          匹配: 关键字同样转字节序列, 在行token字节流中按字节对齐查找,
+ *          命中行从命中偏移起取字节; 空行(无有效token)不占行数窗口
  */
 
 #include <windows.h>
 #include <stdint.h>
 #include <string.h>
 #include "proto_cap.h"
+
+/* -------------------------------------------------------------------------- */
+/*  宏定义                                                                     */
+/* -------------------------------------------------------------------------- */
+#define CAP_LINE_TOKEN_MAX  512u    /**< 单行最大token字节数 */
+#define CAP_KW_BYTE_MAX     32u     /**< 关键字最大字节数 */
 
 /* -------------------------------------------------------------------------- */
 /*  内部私有函数                                                               */
@@ -46,92 +55,94 @@ static uint8_t cap_hex_val(wchar_t ch)
 }
 
 /**
- * @brief   收集行内全部hex字符: 去空格串(小写) + 原行位置索引
+ * @brief   行token化提取字节: 按空白切token, 仅接受"2位纯hex"token
  * @param   p_line  [in]  行文本
- * @param   p_squash [out] 去空格串(小写, 容量PROTO_CAP_BUF_MAX*2无意义, 用行内上限)
- * @param   p_pos   [out] 去空格串每个字符在原行中的索引
- * @param   max     [in]  去空格串容量
- * @return  去空格串长度
+ * @param   p_out   [out] 字节输出(容量CAP_LINE_TOKEN_MAX)
+ * @return  提取字节数(0=无有效token, 视为空行)
  */
-static uint32_t cap_squash_hex(const wchar_t *p_line, wchar_t *p_squash,
-                               uint32_t *p_pos, uint32_t max)
+static uint32_t cap_tokenize(const wchar_t *p_line, uint8_t *p_out)
 {
     uint32_t n = 0u;
-    uint32_t i = 0u;
-    uint32_t line_len = (uint32_t)lstrlenW(p_line);
+    const wchar_t *p = p_line;
 
-    for (i = 0u; (i < line_len) && (n < max); i++) {
-        wchar_t ch = p_line[i];
-
-        if (cap_is_hex(ch) != 0u) {
-            if ((ch >= L'A') && (ch <= L'F')) {
-                ch = (wchar_t)(ch + 32u);   /* 小写化 */
-            }
-            p_squash[n] = ch;
-            p_pos[n] = i;
-            n++;
+    while (*p != L'\0') {
+        /* 跳过空白 */
+        while ((*p == L' ') || (*p == L'\t')) {
+            p++;
         }
-    }
-    if (n < max) {
-        p_squash[n] = L'\0';
+        if (*p == L'\0') {
+            break;
+        }
+        /* 收集一个token */
+        {
+            const wchar_t *p_start = p;
+            uint32_t len = 0u;
+
+            while ((*p != L'\0') && (*p != L' ') && (*p != L'\t')) {
+                p++;
+                len++;
+            }
+            if ((len == 2u) && (cap_is_hex(p_start[0]) != 0u) &&
+                (cap_is_hex(p_start[1]) != 0u) && (n < CAP_LINE_TOKEN_MAX)) {
+                p_out[n] = (uint8_t)((cap_hex_val(p_start[0]) << 4) |
+                                     cap_hex_val(p_start[1]));
+                n++;
+            }
+        }
     }
 
     return n;
 }
 
 /**
- * @brief   关键字去空格小写化
- * @param   p_kw     [in]  关键字原文
- * @param   p_out    [out] 去空格串
- * @param   max      [in]  容量
- * @return  去空格串长度
+ * @brief   关键字转字节序列(忽略空格; 尾部落单半字节忽略)
+ * @param   p_kw  [in]  关键字原文
+ * @param   p_out [out] 字节序列
+ * @return  字节数(0=关键字无效)
  */
-static uint32_t cap_squash_kw(const wchar_t *p_kw, wchar_t *p_out, uint32_t max)
+static uint32_t cap_kw_bytes(const wchar_t *p_kw, uint8_t *p_out)
 {
     uint32_t n = 0u;
     uint32_t i = 0u;
     uint32_t kw_len = (uint32_t)lstrlenW(p_kw);
+    uint8_t hi = 0u;
+    uint8_t have = 0u;
 
-    for (i = 0u; (i < kw_len) && (n < (max - 1u)); i++) {
-        wchar_t ch = p_kw[i];
-
-        if (cap_is_hex(ch) != 0u) {
-            if ((ch >= L'A') && (ch <= L'F')) {
-                ch = (wchar_t)(ch + 32u);
+    for (i = 0u; (i < kw_len) && (n < CAP_KW_BYTE_MAX); i++) {
+        if (cap_is_hex(p_kw[i]) != 0u) {
+            if (have == 0u) {
+                hi = cap_hex_val(p_kw[i]);
+                have = 1u;
+            } else {
+                p_out[n] = (uint8_t)((hi << 4) | cap_hex_val(p_kw[i]));
+                n++;
+                have = 0u;
             }
-            p_out[n] = ch;
-            n++;
         }
     }
-    p_out[n] = L'\0';
 
     return n;
 }
 
 /**
- * @brief   在行内查找关键字命中(去空格匹配), 返回命中起始的原行索引
- * @param   p_line 行文本
- * @param   p_kw   关键字
- * @return  命中起始的原行索引; -1=未命中
+ * @brief   在行token字节流中查找关键字字节序列(按字节对齐)
+ * @param   p_line_bytes [in] 行token字节流
+ * @param   line_len     [in] 字节数
+ * @param   p_kw_bytes   [in] 关键字字节序列
+ * @param   kw_len       [in] 关键字字节数
+ * @return  命中偏移; -1=未命中
  */
-static int32_t cap_find_kw(const wchar_t *p_line, const wchar_t *p_kw)
+static int32_t cap_find_bytes(const uint8_t *p_line_bytes, uint32_t line_len,
+                              const uint8_t *p_kw_bytes, uint32_t kw_len)
 {
-    wchar_t squash[1024u];
-    uint32_t pos[1024u];
-    wchar_t kw_sq[PROTO_CAP_KW_WCHAR];
-    uint32_t squash_len = 0u;
-    uint32_t kw_len = 0u;
     uint32_t i = 0u;
 
-    squash_len = cap_squash_hex(p_line, &squash[0], &pos[0],
-                                (uint32_t)(sizeof(squash) / sizeof(squash[0])));
-    kw_len = cap_squash_kw(p_kw, &kw_sq[0], PROTO_CAP_KW_WCHAR);
-    if ((kw_len == 0u) || (kw_len > squash_len)) {
+    if ((kw_len == 0u) || (kw_len > line_len)) {
         return -1;
     }
-    for (i = 0u; (i + kw_len) <= squash_len; i++) {
-        if (memcmp(&squash[i], &kw_sq[0], (size_t)(kw_len * sizeof(wchar_t))) == 0) {
-            return (int32_t)pos[i];
+    for (i = 0u; (i + kw_len) <= line_len; i++) {
+        if (memcmp(&p_line_bytes[i], p_kw_bytes, (size_t)kw_len) == 0) {
+            return (int32_t)i;
         }
     }
 
@@ -139,65 +150,17 @@ static int32_t cap_find_kw(const wchar_t *p_line, const wchar_t *p_kw)
 }
 
 /**
- * @brief   剥除行首的 [xxx] 样式前缀(时间戳/方向标签, 最多2层)
- * @param   p_line 行文本
- * @return  剥除后的起始指针(无前缀则返回原指针)
+ * @brief   判定捕获是否应收口(窗口行数满或缓冲满)
+ * @param   p_cap 捕获上下文
+ * @param   p_cfg 捕获配置
+ * @return  1=应收口; 0=继续
  */
-static const wchar_t *cap_skip_prefix(const wchar_t *p_line)
+static uint8_t cap_window_done(const PROTO_CAP_T *p_cap, const PROTO_CAP_CFG_T *p_cfg)
 {
-    const wchar_t *p = p_line;
-    uint32_t layer = 0u;
+    uint32_t need = ((p_cfg->lines > PROTO_CAP_LINES_MAX)
+                     ? PROTO_CAP_LINES_MAX : p_cfg->lines) + 1u;
 
-    while ((layer < 2u) && (*p == L'[')) {
-        const wchar_t *p_end = p;
-
-        while ((*p_end != L'\0') && (*p_end != L']')) {
-            p_end++;
-        }
-        if (*p_end != L']') {
-            break;
-        }
-        p = p_end + 1u;
-        while ((*p == L' ') || (*p == L'\t')) {
-            p++;
-        }
-        layer++;
-    }
-
-    return p;
-}
-
-/**
- * @brief   从指定起点提取行内hex字节(两两组字节, 非hex跳过; 尾部落单忽略)
- * @param   p_start [in]     提取起点(原行指针)
- * @param   p_buf   [in/out] 字节缓冲
- * @param   p_len   [in/out] 当前字节数(进入时已有量)
- * @param   max     [in]     缓冲容量
- * @return  无
- */
-static void cap_extract(const wchar_t *p_start, uint8_t *p_buf, uint32_t *p_len,
-                        uint32_t max)
-{
-    uint8_t hi = 0u;
-    uint8_t have = 0u;
-
-    while (*p_start != L'\0') {
-        if (cap_is_hex(*p_start) != 0u) {
-            if (have == 0u) {
-                hi = cap_hex_val(*p_start);
-                have = 1u;
-            } else {
-                if (*p_len < max) {
-                    p_buf[*p_len] = (uint8_t)((hi << 4) | cap_hex_val(*p_start));
-                    (*p_len)++;
-                } else {
-                    return;   /* 缓冲满 */
-                }
-                have = 0u;
-            }
-        }
-        p_start++;
-    }
+    return ((p_cap->collected >= need) || (p_cap->len >= PROTO_CAP_BUF_MAX)) ? 1u : 0u;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -215,6 +178,10 @@ void proto_cap_init(PROTO_CAP_T *p_cap)
 uint8_t proto_cap_feed(PROTO_CAP_T *p_cap, const PROTO_CAP_CFG_T *p_cfg,
                        const wchar_t *p_line, uint8_t *p_out, uint32_t *p_out_len)
 {
+    uint8_t line_bytes[CAP_LINE_TOKEN_MAX];
+    uint32_t line_len = 0u;
+    uint8_t kw_bytes[CAP_KW_BYTE_MAX];
+    uint32_t kw_len = 0u;
     int32_t hit = -1;
 
     if ((p_cap == NULL) || (p_cfg == NULL) || (p_line == NULL) ||
@@ -223,11 +190,17 @@ uint8_t proto_cap_feed(PROTO_CAP_T *p_cap, const PROTO_CAP_CFG_T *p_cfg,
     }
     *p_out_len = 0u;
 
-    /* 捕获中再次命中: 先收口当前组再开新组(连续报文场景) */
-    hit = cap_find_kw(p_line, &p_cfg->keyword[0]);
+    line_len = cap_tokenize(p_line, &line_bytes[0]);
+    if (line_len == 0u) {
+        return 0u;   /* 空行/无有效hex token: 不占窗口不产字节 */
+    }
+
+    kw_len = cap_kw_bytes(&p_cfg->keyword[0], &kw_bytes[0]);
+    hit = cap_find_bytes(&line_bytes[0], line_len, &kw_bytes[0], kw_len);
     if (hit >= 0) {
         uint8_t done = 0u;
 
+        /* 捕获中再次命中: 先收口当前组再开新组(连续报文不粘连) */
         if (p_cap->active != 0u) {
             if (p_cap->len > 0u) {
                 memcpy(p_out, &p_cap->buf[0], p_cap->len);
@@ -238,17 +211,20 @@ uint8_t proto_cap_feed(PROTO_CAP_T *p_cap, const PROTO_CAP_CFG_T *p_cfg,
         }
         p_cap->active = 1u;
         p_cap->collected = 1u;
-        cap_extract(&p_line[hit], &p_cap->buf[0], &p_cap->len, PROTO_CAP_BUF_MAX);
         {
-            uint32_t need = ((p_cfg->lines > PROTO_CAP_LINES_MAX)
-                             ? PROTO_CAP_LINES_MAX : p_cfg->lines) + 1u;
+            uint32_t copy = (line_len - (uint32_t)hit);
 
-            if ((p_cap->collected >= need) || (p_cap->len >= PROTO_CAP_BUF_MAX)) {
-                memcpy(p_out, &p_cap->buf[0], p_cap->len);
-                *p_out_len = p_cap->len;
-                proto_cap_init(p_cap);
-                return 1u;
+            if ((p_cap->len + copy) > PROTO_CAP_BUF_MAX) {
+                copy = (PROTO_CAP_BUF_MAX - p_cap->len);
             }
+            memcpy(&p_cap->buf[p_cap->len], &line_bytes[hit], copy);
+            p_cap->len += copy;
+        }
+        if (cap_window_done(p_cap, p_cfg) != 0u) {
+            memcpy(p_out, &p_cap->buf[0], p_cap->len);
+            *p_out_len = p_cap->len;
+            proto_cap_init(p_cap);
+            return 1u;
         }
         return done;
     }
@@ -257,21 +233,41 @@ uint8_t proto_cap_feed(PROTO_CAP_T *p_cap, const PROTO_CAP_CFG_T *p_cfg,
         return 0u;
     }
 
-    /* 后续行: 剥前缀后全行提取 */
-    cap_extract(cap_skip_prefix(p_line), &p_cap->buf[0], &p_cap->len,
-                PROTO_CAP_BUF_MAX);
-    p_cap->collected++;
+    /* 后续有效行: 全行token字节并入 */
     {
-        uint32_t need = ((p_cfg->lines > PROTO_CAP_LINES_MAX)
-                         ? PROTO_CAP_LINES_MAX : p_cfg->lines) + 1u;
+        uint32_t copy = line_len;
 
-        if ((p_cap->collected >= need) || (p_cap->len >= PROTO_CAP_BUF_MAX)) {
-            memcpy(p_out, &p_cap->buf[0], p_cap->len);
-            *p_out_len = p_cap->len;
-            proto_cap_init(p_cap);
-            return 1u;
+        if ((p_cap->len + copy) > PROTO_CAP_BUF_MAX) {
+            copy = (PROTO_CAP_BUF_MAX - p_cap->len);
         }
+        memcpy(&p_cap->buf[p_cap->len], &line_bytes[0], copy);
+        p_cap->len += copy;
+    }
+    p_cap->collected++;
+    if (cap_window_done(p_cap, p_cfg) != 0u) {
+        memcpy(p_out, &p_cap->buf[0], p_cap->len);
+        *p_out_len = p_cap->len;
+        proto_cap_init(p_cap);
+        return 1u;
     }
 
     return 0u;
+}
+
+uint8_t proto_cap_active(const PROTO_CAP_T *p_cap)
+{
+    return ((p_cap != NULL) && (p_cap->active != 0u)) ? 1u : 0u;
+}
+
+uint8_t proto_cap_take(PROTO_CAP_T *p_cap, uint8_t *p_out, uint32_t *p_out_len)
+{
+    if ((p_cap == NULL) || (p_out == NULL) || (p_out_len == NULL) ||
+        (p_cap->active == 0u) || (p_cap->len == 0u)) {
+        return 0u;
+    }
+    memcpy(p_out, &p_cap->buf[0], p_cap->len);
+    *p_out_len = p_cap->len;
+    proto_cap_init(p_cap);
+
+    return 1u;
 }

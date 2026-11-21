@@ -64,6 +64,29 @@
 #define PV_REPORT_WCHAR   (64u * 1024u) /**< 解析报告缓冲(宽字符) */
 #define PV_DIR_MAX        260u    /**< 保存目录容量 */
 #define PV_TEXT_MAX       160u    /**< 通用文本缓冲 */
+#define PV_IDLE_FLUSH_MS  600u    /**< 空闲收口阈值(毫秒, 报文一次打完后收口) */
+
+/* ListView 消息/常量(注意A/W为不同消息号, 须用W版; 本地定义避免宏歧义) */
+#define PV_LVM_FIRST            0x1000u                       /**< ListView消息基址 */
+#define PV_LVM_INSERTCOLUMNW    (PV_LVM_FIRST + 97u)          /**< 插入列(Unicode) */
+#define PV_LVM_INSERTITEMW      (PV_LVM_FIRST + 77u)          /**< 插入行(Unicode) */
+#define PV_LVM_SETITEMW         (PV_LVM_FIRST + 76u)          /**< 设置子项(Unicode) */
+#define PV_LVM_DELETEALLITEMS   (PV_LVM_FIRST + 9u)           /**< 清空全部行 */
+#define PV_LVM_GETNEXTITEM      (PV_LVM_FIRST + 12u)          /**< 查选中行 */
+#define PV_LVM_SETITEMSTATE     (PV_LVM_FIRST + 43u)          /**< 设置行状态 */
+#define PV_LVM_SETEXTLISTSTYLE  (PV_LVM_FIRST + 54u)          /**< 设置扩展样式 */
+#define PV_LVS_REPORT           0x0001u                       /**< 报表模式 */
+#define PV_LVS_SINGLESEL        0x0004u                       /**< 单选 */
+#define PV_LVS_SHOWSELALWAYS    0x0008u                       /**< 始终显示选中 */
+#define PV_LVCF_TEXT            0x0004u                       /**< 列文本有效 */
+#define PV_LVCF_WIDTH           0x0002u                       /**< 列宽有效 */
+#define PV_LVIF_TEXT            0x0001u                       /**< 项文本有效 */
+#define PV_LVIF_STATE           0x0008u                       /**< 状态有效 */
+#define PV_LVIS_FOCUSED         0x0001u                       /**< 焦点态 */
+#define PV_LVIS_SELECTED        0x0002u                       /**< 选中态 */
+#define PV_LVNI_SELECTED        0x0002u                       /**< 查找选中条件 */
+#define PV_LVS_EX_FULLROWSELECT 0x00000020u                   /**< 整行选中 */
+#define PV_LVN_ITEMCHANGED      (0u - 99u)                    /**< 选中行变化通知 */
 
 #define PV_CLR_BTN_BG     0x00F3F4F8  /**< 中性按钮底色 */
 #define PV_CLR_BTN_HV     0x00FFFFFF  /**< 中性按钮悬停底色 */
@@ -86,9 +109,53 @@ typedef struct PV_PARSER_TAG
 /** 单条解析记录(堆内容, 环形淘汰时释放) */
 typedef struct PV_REC_TAG
 {
-    wchar_t  *p_detail;    /**< 详情全文(原始hex+报告, heap) */
-    wchar_t  summary[PV_TEXT_MAX];  /**< 列表摘要 */
+    wchar_t  *p_detail;                  /**< 详情全文(原始hex+报告, heap) */
+    wchar_t  time_str[12u];              /**< 列表列: 捕获时刻 HH:MM:SS */
+    uint32_t bytes;                      /**< 列表列: 报文字节数 */
+    wchar_t  result[PV_TEXT_MAX];        /**< 列表列: 解析结果摘要 */
 } PV_REC_T;
+
+/** ListView列定义(LVCOLUMNW布局, 本地定义) */
+typedef struct PV_LVCOL_TAG
+{
+    UINT       mask;          /**< 有效字段掩码 */
+    int32_t    fmt;           /**< 对齐 */
+    int32_t    cx;            /**< 列宽 */
+    wchar_t   *pszText;       /**< 列标题 */
+    int32_t    cchTextMax;    /**< 文本容量 */
+    int32_t    iSubItem;      /**< 列索引 */
+    int32_t    iImage;        /**< 图像 */
+    int32_t    iOrder;        /**< 排序序号 */
+    int32_t    cxMin;         /**< 最小宽 */
+    int32_t    cxDefault;     /**< 缺省宽 */
+    int32_t    cxIdeal;       /**< 理想宽 */
+} PV_LVCOL_T;
+
+/** ListView项(LVITEMW布局, 本地定义) */
+typedef struct PV_LVITEM_TAG
+{
+    UINT       mask;          /**< 有效字段掩码 */
+    int32_t    iItem;         /**< 行索引 */
+    int32_t    iSubItem;      /**< 列索引 */
+    UINT       state;         /**< 状态 */
+    UINT       stateMask;     /**< 状态掩码 */
+    wchar_t   *pszText;       /**< 项文本 */
+    int32_t    cchTextMax;    /**< 文本容量 */
+    int32_t    iImage;        /**< 图像 */
+    LPARAM     lParam;        /**< 附加参数 */
+    int32_t    iIndent;       /**< 缩进 */
+    int32_t    iGroupId;      /**< 组 */
+    UINT       cColumns;      /**< 列数 */
+    UINT      *puColumns;     /**< 列数组 */
+} PV_LVITEM_T;
+
+/** 通用通知头(NMHDR布局, 本地定义) */
+typedef struct PV_NMHDR_TAG
+{
+    HWND       hwndFrom;      /**< 来源控件 */
+    UINT_PTR   idFrom;        /**< 来源ID */
+    UINT       code;          /**< 通知码 */
+} PV_NMHDR_T;
 
 /* -------------------------------------------------------------------------- */
 /*  模块内部全局变量                                                           */
@@ -109,6 +176,7 @@ static PV_REC_T  g_pv_recs[PV_REC_MAX] = {0};       /**< 记录环形数组 */
 static uint32_t  g_pv_rec_count = 0u;               /**< 当前记录数 */
 static uint32_t  g_pv_rec_head = 0u;                /**< 最旧记录物理槽位 */
 static uint32_t  g_pv_hit_total = 0u;               /**< 累计命中条数 */
+static uint32_t  g_pv_last_feed_tick = 0u;          /**< 最近喂行时刻(空闲收口用) */
 
 static wchar_t   g_pv_dir[PV_DIR_MAX] = L"";        /**< 自动保存目录 */
 static uint8_t   g_pv_autosave = 1u;                /**< 自动保存开关 */
@@ -279,7 +347,7 @@ static HWND pv_create_child(HWND hwnd, const wchar_t *p_class, uint32_t style,
 }
 
 /**
- * @brief   刷新记录列表(全量重建)与状态行
+ * @brief   刷新记录表格(全量重建)与状态行
  * @param   hwnd 窗口句柄
  * @return  无
  */
@@ -288,13 +356,41 @@ static void pv_refresh_list(HWND hwnd)
     HWND h_list = GetDlgItem(hwnd, (int)PV_IDC_LIST_REC);
     uint32_t i = 0u;
 
-    (void)SendMessageW(h_list, LB_RESETCONTENT, 0u, 0u);
+    (void)SendMessageW(h_list, PV_LVM_DELETEALLITEMS, 0u, 0u);
     for (i = 0u; i < g_pv_rec_count; i++) {
-        (void)SendMessageW(h_list, LB_ADDSTRING, 0u,
-                           (LPARAM)&g_pv_recs[pv_slot(i)].summary[0]);
+        const PV_REC_T *p_rec = &g_pv_recs[pv_slot(i)];
+        wchar_t cell[PV_TEXT_MAX];
+        PV_LVITEM_T item;
+
+        memset(&item, 0u, sizeof(item));
+        item.mask = PV_LVIF_TEXT;
+        item.iItem = (int32_t)i;
+        item.iSubItem = 0;
+        (void)wsprintfW(&cell[0], L"#%03u", (unsigned int)(i + 1u));
+        item.pszText = &cell[0];
+        (void)SendMessageW(h_list, PV_LVM_INSERTITEMW, 0u, (LPARAM)&item);
+
+        item.iSubItem = 1;
+        item.pszText = (wchar_t *)&p_rec->time_str[0];
+        (void)SendMessageW(h_list, PV_LVM_SETITEMW, 0u, (LPARAM)&item);
+        item.iSubItem = 2;
+        (void)wsprintfW(&cell[0], L"%uB", (unsigned int)p_rec->bytes);
+        item.pszText = &cell[0];
+        (void)SendMessageW(h_list, PV_LVM_SETITEMW, 0u, (LPARAM)&item);
+        item.iSubItem = 3;
+        item.pszText = (wchar_t *)&p_rec->result[0];
+        (void)SendMessageW(h_list, PV_LVM_SETITEMW, 0u, (LPARAM)&item);
     }
     if (g_pv_rec_count > 0u) {
-        (void)SendMessageW(h_list, LB_SETCURSEL, (WPARAM)(g_pv_rec_count - 1u), 0u);
+        PV_LVITEM_T sel_item;
+
+        memset(&sel_item, 0u, sizeof(sel_item));
+        sel_item.mask = PV_LVIF_STATE;
+        sel_item.iItem = (int32_t)(g_pv_rec_count - 1u);
+        sel_item.state = (PV_LVIS_SELECTED | PV_LVIS_FOCUSED);
+        sel_item.stateMask = (PV_LVIS_SELECTED | PV_LVIS_FOCUSED);
+        (void)SendMessageW(h_list, PV_LVM_SETITEMSTATE,
+                           (WPARAM)(g_pv_rec_count - 1u), (LPARAM)&sel_item);
     }
     {
         wchar_t text[PV_TEXT_MAX];
@@ -315,10 +411,14 @@ static void pv_refresh_list(HWND hwnd)
 static void pv_show_detail(HWND hwnd)
 {
     HWND h_list = GetDlgItem(hwnd, (int)PV_IDC_LIST_REC);
-    LRESULT sel = SendMessageW(h_list, LB_GETCURSEL, 0u, 0u);
+    LRESULT sel = SendMessageW(h_list, PV_LVM_GETNEXTITEM, (WPARAM)-1,
+                               (LPARAM)PV_LVNI_SELECTED);
     const wchar_t *p_text = L"(无记录)";
 
-    if ((sel >= 0) && ((uint32_t)sel < g_pv_rec_count)) {
+    if (sel < 0) {
+        sel = (LRESULT)((g_pv_rec_count > 0u) ? (g_pv_rec_count - 1u) : 0u);
+    }
+    if (((uint32_t)sel < g_pv_rec_count) && (g_pv_rec_count > 0u)) {
         const PV_REC_T *p_rec = &g_pv_recs[pv_slot((uint32_t)sel)];
 
         if ((p_rec->p_detail != NULL) && (p_rec->p_detail[0] != L'\0')) {
@@ -346,6 +446,7 @@ static void pv_commit(HWND hwnd, const uint8_t *p_data, uint32_t len)
     SYSTEMTIME st;
     uint32_t pos = 0u;
     uint32_t i = 0u;
+    uint32_t total_frames = 0u;
     PV_REC_T *p_rec = NULL;
     const wchar_t *p_first_name = L"";
 
@@ -383,6 +484,7 @@ static void pv_commit(HWND hwnd, const uint8_t *p_data, uint32_t len)
                 (uint32_t)(sizeof(detail) / sizeof(detail[0]))) {
                 pos += (uint32_t)wsprintfW(&detail[pos], L"%s", &report[0]);
             }
+            total_frames += frames;
             if (p_first_name[0] == L'\0') {
                 p_first_name = &g_pv_parsers[i].name[0];
             }
@@ -406,11 +508,18 @@ static void pv_commit(HWND hwnd, const uint8_t *p_data, uint32_t len)
         return;
     }
     memcpy(p_rec->p_detail, &detail[0], ((SIZE_T)pos + 1u) * sizeof(wchar_t));
-    (void)wsprintfW(&p_rec->summary[0], L"#%03u %02u:%02u:%02u %uB %s",
-                    (unsigned int)(g_pv_hit_total + 1u),
+    (void)wsprintfW(&p_rec->time_str[0], L"%02u:%02u:%02u",
                     (unsigned int)st.wHour, (unsigned int)st.wMinute,
-                    (unsigned int)st.wSecond, (unsigned int)len,
-                    (p_first_name[0] != L'\0') ? p_first_name : L"原始");
+                    (unsigned int)st.wSecond);
+    p_rec->bytes = len;
+    if (p_first_name[0] == L'\0') {
+        lstrcpynW(&p_rec->result[0], L"原始(未解析)", PV_TEXT_MAX);
+    } else if (total_frames > 0u) {
+        (void)wsprintfW(&p_rec->result[0], L"%s: %u帧 通过", p_first_name,
+                        (unsigned int)total_frames);
+    } else {
+        (void)wsprintfW(&p_rec->result[0], L"%s: 失败(见详情)", p_first_name);
+    }
     g_pv_rec_count++;
     g_pv_hit_total++;
 
@@ -539,10 +648,33 @@ static void pv_create_controls(HWND hwnd)
                           (uint32_t)(ES_AUTOHSCROLL | ES_NUMBER | WS_BORDER),
                           PV_IDC_ED_LINES, UI_FONT_KIND_EDIT);
 
-    (void)pv_create_child(hwnd, L"LISTBOX",
-                          (uint32_t)(WS_BORDER | WS_VSCROLL | LBS_NOTIFY |
-                                     LBS_NOINTEGRALHEIGHT),
-                          PV_IDC_LIST_REC, UI_FONT_KIND_EDIT);
+    /* 记录表格(ListView报表模式: 带表头, 序号/时间/字节/结果) */
+    {
+        HWND h_list = pv_create_child(hwnd, L"SysListView32",
+                                      (uint32_t)(WS_BORDER | WS_VSCROLL |
+                                                 PV_LVS_REPORT | PV_LVS_SINGLESEL |
+                                                 PV_LVS_SHOWSELALWAYS),
+                                      PV_IDC_LIST_REC, UI_FONT_KIND_EDIT);
+        static const wchar_t *const col_titles[4u] =
+        {
+            L"序号", L"时间", L"字节", L"结果"
+        };
+        static const int32_t col_widths[4u] = {64, 90, 72, 460};
+        uint32_t c = 0u;
+
+        for (c = 0u; c < 4u; c++) {
+            PV_LVCOL_T col;
+
+            memset(&col, 0u, sizeof(col));
+            col.mask = (PV_LVCF_TEXT | PV_LVCF_WIDTH);
+            col.pszText = (wchar_t *)col_titles[c];
+            col.cx = col_widths[c];
+            (void)SendMessageW(h_list, PV_LVM_INSERTCOLUMNW, (WPARAM)c, (LPARAM)&col);
+        }
+        (void)SendMessageW(h_list, PV_LVM_SETEXTLISTSTYLE,
+                           (WPARAM)PV_LVS_EX_FULLROWSELECT,
+                           (LPARAM)PV_LVS_EX_FULLROWSELECT);
+    }
     (void)pv_create_child(hwnd, L"EDIT",
                           (uint32_t)(ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL |
                                      WS_VSCROLL | WS_HSCROLL | WS_BORDER),
@@ -634,7 +766,7 @@ static void pv_load_cfg(HWND hwnd)
     memset(&text[0], 0, sizeof(text));
     dbg_conf_get_str(L"Proto", L"Keyword", L"23 23 02 FE", &g_pv_cfg.keyword[0],
                      PROTO_CAP_KW_WCHAR);
-    g_pv_cfg.lines = dbg_conf_get_uint(L"Proto", L"Lines", 3u);
+    g_pv_cfg.lines = dbg_conf_get_uint(L"Proto", L"Lines", 5u);
     if (g_pv_cfg.lines > PROTO_CAP_LINES_MAX) {
         g_pv_cfg.lines = PROTO_CAP_LINES_MAX;
     }
@@ -845,6 +977,16 @@ static LRESULT CALLBACK pv_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
             EndPaint(hwnd, &ps);
             return 0;
         }
+        case WM_NOTIFY:
+        {
+            const PV_NMHDR_T *p_hdr = (const PV_NMHDR_T *)lp;
+
+            if ((p_hdr != NULL) && (p_hdr->idFrom == (UINT_PTR)PV_IDC_LIST_REC) &&
+                (p_hdr->code == PV_LVN_ITEMCHANGED)) {
+                pv_show_detail(hwnd);
+            }
+            return 0;
+        }
         case WM_COMMAND:
         {
             uint32_t id = (uint32_t)LOWORD(wp);
@@ -889,9 +1031,6 @@ static LRESULT CALLBACK pv_wnd_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
                 g_pv_cfg.lines = (v > PROTO_CAP_LINES_MAX) ? PROTO_CAP_LINES_MAX : v;
                 proto_cap_init(&g_pv_cap);
                 pv_save_cfg();
-            } else if ((id == (uint32_t)PV_IDC_LIST_REC) &&
-                       (code == (uint32_t)LBN_SELCHANGE)) {
-                pv_show_detail(hwnd);
             }
             return 0;
         }
@@ -1021,7 +1160,29 @@ void proto_view_feed(const wchar_t *p_line)
     if ((g_pv_hwnd == NULL) || (g_pv_enabled == 0u) || (p_line == NULL)) {
         return;
     }
+    g_pv_last_feed_tick = GetTickCount();
     if (proto_cap_feed(&g_pv_cap, &g_pv_cfg, p_line, &out[0], &out_len) != 0u) {
+        pv_commit(g_pv_hwnd, &out[0], out_len);
+    }
+}
+
+void proto_view_tick(void)
+{
+    uint8_t out[PROTO_CAP_BUF_MAX];
+    uint32_t out_len = 0u;
+
+    if ((g_pv_hwnd == NULL) || (g_pv_enabled == 0u)) {
+        return;
+    }
+    if (proto_cap_active(&g_pv_cap) == 0u) {
+        return;
+    }
+    /* 空闲收口: 报文一次打完后行流静默(行数窗口配大也不滞留),
+       连续报文则由再次命中路径收口 */
+    if ((GetTickCount() - g_pv_last_feed_tick) < PV_IDLE_FLUSH_MS) {
+        return;
+    }
+    if (proto_cap_take(&g_pv_cap, &out[0], &out_len) != 0u) {
         pv_commit(g_pv_hwnd, &out[0], out_len);
     }
 }

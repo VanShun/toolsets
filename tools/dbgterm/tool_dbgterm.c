@@ -1229,6 +1229,11 @@ static void tool_process_rx(HWND hwnd)
     uint8_t  stick = 1u;  /* 批处理开始时的底部跟随状态 */
     uint32_t anchor_ch = 0u;   /* 锁定时的可视首行锚点字符索引 */
 
+    /* 协议解析窗口空闲收口(须在早退前: 无数据节拍也要推进) */
+    if (proto_view_is_open() != 0u) {
+        proto_view_tick();
+    }
+
     /* 早退: 本拍无新数据且无到期的空闲断行半行 -> 完全不碰控件
        (此前每拍无条件 开重绘+整域失效+光标操作 => 无数据也闪烁) */
     if ((dbg_source_rx_has_data(&g_tool_rx) == 0u) &&

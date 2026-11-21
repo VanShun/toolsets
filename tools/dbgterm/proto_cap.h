@@ -3,10 +3,13 @@
  * @author  herongshun
  * @date    2026-11-21
  * @brief   协议行捕获接口(纯C, 无界面依赖)
- *          从调试终端的显示行流中按"起始关键字+向下行数"捕获报文字节:
- *          关键字按hex字符忽略空格/大小写匹配(如"23 23 02 FE"可命中"232302fe");
- *          命中行从命中位置起提取hex字节, 后续行剥除行首[时间戳]类前缀后
- *          全行提取, 拼接为报文缓冲; 收满(1+向下行数)行输出组包结果
+ *          从调试终端的显示行流中按"起始关键字+向下行数"捕获报文字节;
+ *          提取按token: 仅接受"空白分隔的2位纯hex"token——logcat前缀
+ *          (I/yaxon ( 2035): [2026/11/21 … INFO]: c:0623]: 等)与空行
+ *          时间戳均不满足该形态, 不混入字节流;
+ *          关键字忽略空格/大小写转字节序列后按字节对齐查找;
+ *          空行(无有效token)不占行数窗口; 组包完成条件=窗口行数满或
+ *          调用方强制收口(proto_cap_take, 供空闲超时/再次命中场景)
  */
 
 #ifndef PROTO_CAP_H
@@ -63,5 +66,21 @@ void proto_cap_init(PROTO_CAP_T *p_cap);
  */
 uint8_t proto_cap_feed(PROTO_CAP_T *p_cap, const PROTO_CAP_CFG_T *p_cfg,
                        const wchar_t *p_line, uint8_t *p_out, uint32_t *p_out_len);
+
+/**
+ * @brief   查询捕获是否进行中(有未收口的组)
+ * @param   p_cap 捕获上下文
+ * @return  1=进行中; 0=空闲
+ */
+uint8_t proto_cap_active(const PROTO_CAP_T *p_cap);
+
+/**
+ * @brief   强制收口当前组(空闲超时等场景; 空闲上下文返回0)
+ * @param   p_cap     [in/out] 捕获上下文
+ * @param   p_out     [out]    组包结果输出缓冲
+ * @param   p_out_len [out]    组包字节数
+ * @return  1=有组收口; 0=无
+ */
+uint8_t proto_cap_take(PROTO_CAP_T *p_cap, uint8_t *p_out, uint32_t *p_out_len);
 
 #endif /* PROTO_CAP_H */

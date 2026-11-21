@@ -57,10 +57,17 @@ uint8_t proto_view_is_open(void);
 
 /**
  * @brief   喂入一行显示文本(主窗口每行落地时调用, 窗口关闭时由调用方跳过)
- * @param   p_line 行文本(可带[时间戳]前缀)
+ * @param   p_line 行文本(可带[时间戳]/logcat前缀)
  * @return  无
  */
 void proto_view_feed(const wchar_t *p_line);
+
+/**
+ * @brief   节拍驱动(主窗口每拍调用): 空闲超时收口当前捕获组
+ * @param   无
+ * @return  无
+ */
+void proto_view_tick(void);
 
 /**
  * @brief   打开协议解析窗口(单实例, 已打开则前置)

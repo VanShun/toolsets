@@ -3,8 +3,8 @@
  * @author  herongshun
  * @date    2026-11-21
  * @brief   proto_cap 模块单元测试(控制台)
- *          覆盖: 关键字去空格/大小写匹配, 命中行从命中点提取, 后续行剥
- *          [时间戳]前缀提取, 行数窗口收口, 捕获中再命中先收口, 行数0
+ *          覆盖: 2位hex token提取(logcat前缀/时间戳不污染), 关键字字节
+ *          对齐命中, 行数窗口收口, 空行跳过, 再命中收口, 强制收口
  */
 
 #include <stdio.h>
@@ -26,12 +26,11 @@
 
 /**
  * @brief   断言组包字节等于期望
- * @param   p_cap    捕获上下文(输出侧)
- * @param   p_out    组包输出
- * @param   out_len  组包长度
- * @param   p_expect [in] 期望字节
+ * @param   p_out      组包输出
+ * @param   out_len    组包长度
+ * @param   p_expect   期望字节
  * @param   expect_len 期望长度
- * @param   p_name   用例名
+ * @param   p_name     用例名
  * @return  0: 通过; 1: 失败
  */
 static int32_t check_bytes(const uint8_t *p_out, uint32_t out_len,
@@ -103,11 +102,11 @@ static int32_t test_basic_window(void)
 }
 
 /**
- * @brief   用例: 无空格小写hex命中 + 行数0(仅命中行)
+ * @brief   用例: 行数0(仅命中行) + 噪声token过滤
  * @param   无
  * @return  0: 通过; 1: 失败
  */
-static int32_t test_nospace_zero_lines(void)
+static int32_t test_zero_lines_noise(void)
 {
     PROTO_CAP_T cap;
     PROTO_CAP_CFG_T cfg;
@@ -120,13 +119,14 @@ static int32_t test_nospace_zero_lines(void)
     cfg.lines = 0u;
     proto_cap_init(&cap);
 
-    if (proto_cap_feed(&cap, &cfg, L"noise 242401fe99 tail", &out[0], &out_len) != 1u) {
-        printf("[FAIL] test_nospace_zero_lines: not flushed\n");
+    if (proto_cap_feed(&cap, &cfg, L"noise 24 24 01 FE 99 tail 2035):",
+                       &out[0], &out_len) != 1u) {
+        printf("[FAIL] test_zero_lines_noise: not flushed\n");
         return TEST_FAIL;
     }
 
     return check_bytes(&out[0], out_len, &expect[0], (uint32_t)sizeof(expect),
-                       "test_nospace_zero_lines");
+                       "test_zero_lines_noise");
 }
 
 /**
@@ -149,7 +149,6 @@ static int32_t test_rehit_flush(void)
     proto_cap_init(&cap);
 
     (void)proto_cap_feed(&cap, &cfg, L"[1] 23 23 02 FE AA", &out[0], &out_len);
-    /* 第二次命中: 应立即输出第一组 */
     if (proto_cap_feed(&cap, &cfg, L"[2] 23 23 02 FE BB", &out[0], &out_len) != 1u) {
         printf("[FAIL] test_rehit_flush: group1 not flushed\n");
         return TEST_FAIL;
@@ -158,7 +157,6 @@ static int32_t test_rehit_flush(void)
                     "test_rehit_flush#1") != TEST_PASS) {
         return TEST_FAIL;
     }
-    /* 第三行普通行收满窗口(1+3行? collected=命中1+普通1 <4 需再喂) */
     (void)proto_cap_feed(&cap, &cfg, L"[3] 00", &out[0], &out_len);
     (void)proto_cap_feed(&cap, &cfg, L"[4] 00", &out[0], &out_len);
     if (proto_cap_feed(&cap, &cfg, L"[5] 00", &out[0], &out_len) != 1u) {
@@ -171,29 +169,101 @@ static int32_t test_rehit_flush(void)
 }
 
 /**
- * @brief   用例: 命中点前的时间戳数字不混入(从命中位置起提取)
+ * @brief   hex字符串(可含空格)转字节
+ * @param   p_hex [in]  hex文本
+ * @param   p_out [out] 字节输出
+ * @return  字节数
+ */
+static uint32_t hex_to_bytes(const wchar_t *p_hex, uint8_t *p_out)
+{
+    uint32_t n = 0u;
+    uint8_t hi = 0u;
+    uint8_t have = 0u;
+    const wchar_t *digits = L"0123456789ABCDEF";
+    const wchar_t *p = p_hex;
+
+    while (*p != L'\0') {
+        const wchar_t *p_hit = wcschr(digits, *p);
+
+        if (p_hit != NULL) {
+            uint8_t v = (uint8_t)(p_hit - digits);
+
+            if (have == 0u) {
+                hi = v;
+                have = 1u;
+            } else {
+                p_out[n] = (uint8_t)((hi << 4) | v);
+                n++;
+                have = 0u;
+            }
+        }
+        p++;
+    }
+
+    return n;
+}
+
+/**
+ * @brief   用例: 真实logcat格式行, 前缀含大量hex状字符不污染;
+ *          空行(仅时间戳)跳过; 强制收口
  * @param   无
  * @return  0: 通过; 1: 失败
  */
-static int32_t test_ts_not_leaked(void)
+static int32_t test_logcat_real(void)
 {
     PROTO_CAP_T cap;
     PROTO_CAP_CFG_T cfg;
     uint8_t out[PROTO_CAP_BUF_MAX];
+    uint8_t expect[PROTO_CAP_BUF_MAX];
+    uint32_t expect_len = 0u;
     uint32_t out_len = 0u;
-    static const uint8_t expect[] = {0x23, 0x23, 0x02, 0xFE, 0x10};
+    static const wchar_t line1[] =
+        L"[17:07:57.221] I/yaxon   ( 2035): [2026/11/21 17:07:56.717113 INFO]: "
+        L"[gps_app.exe yx_tcp_drv.c:0623]: 23 23 02 FE 4C 53 36 41 42 43 31 30 37 53 43 "
+        L"30 30 30 35 30 33 01 01 CD 1A 0B 15 11 07 38 01 FE 03 01 8F FF FF FF FF FF FF "
+        L"FF FF FF 00 FF FE 0B B8 63 FF 02 01 01 00 FF EC 77 00 00 FF FF F6 00 00 05 01 "
+        L"07 0B 51 BD 01 75 A3 C7 06 01 01 0C DF 01 01 0C DF 01 01 41 01 01 41 07 00 00 "
+        L"00 00 00 00 00 00 00 08 01 01 FF FF FF FF 00 A8 00 01 A8 0C DF 0C DF";
+    static const wchar_t line2[] =
+        L"[17:07:57.221] I/yaxon   ( 2035): [2026/11/21 17:07:56.717113 INFO]: "
+        L"[gps_app.exe yx_tcp_drv.c:0629]: 0C DF 09 01 01 00 20 41 41 B4";
+    /* 期望 = 行1命中点起的全部token + 行2全部token */
+    static const wchar_t expect_hex[] =
+        L"23 23 02 FE 4C 53 36 41 42 43 31 30 37 53 43 30 30 30 35 30 33 01 01 CD "
+        L"1A 0B 15 11 07 38 01 FE 03 01 8F FF FF FF FF FF FF FF FF FF 00 FF FE "
+        L"0B B8 63 FF 02 01 01 00 FF EC 77 00 00 FF FF F6 00 00 05 01 07 0B 51 "
+        L"BD 01 75 A3 C7 06 01 01 0C DF 01 01 0C DF 01 01 41 01 01 41 07 00 00 "
+        L"00 00 00 00 00 00 00 08 01 01 FF FF FF FF 00 A8 00 01 A8 0C DF 0C DF "
+        L"0C DF 09 01 01 00 20 41 41 B4";
 
     memset(&cfg, 0, sizeof(cfg));
     lstrcpynW(&cfg.keyword[0], L"23 23 02 FE", PROTO_CAP_KW_WCHAR);
-    cfg.lines = 0u;
+    cfg.lines = 5u;
     proto_cap_init(&cap);
+    expect_len = hex_to_bytes(&expect_hex[0], &expect[0]);
 
-    /* 时间戳含大量hex字符(12:33:44 -> 123344), 不应混入 */
-    (void)proto_cap_feed(&cap, &cfg, L"[12:33:44.567] 23 23 02 FE 10",
-                         &out[0], &out_len);
+    if (proto_cap_feed(&cap, &cfg, &line1[0], &out[0], &out_len) != 0u) {
+        printf("[FAIL] test_logcat_real: unexpected flush\n");
+        return TEST_FAIL;
+    }
+    if (proto_cap_feed(&cap, &cfg, L"[17:07:57.221] ", &out[0], &out_len) != 0u) {
+        printf("[FAIL] test_logcat_real: blank line counted\n");
+        return TEST_FAIL;
+    }
+    if (proto_cap_feed(&cap, &cfg, &line2[0], &out[0], &out_len) != 0u) {
+        printf("[FAIL] test_logcat_real: flushed early\n");
+        return TEST_FAIL;
+    }
+    if (proto_cap_active(&cap) != 1u) {
+        printf("[FAIL] test_logcat_real: not active\n");
+        return TEST_FAIL;
+    }
+    if (proto_cap_take(&cap, &out[0], &out_len) != 1u) {
+        printf("[FAIL] test_logcat_real: take failed\n");
+        return TEST_FAIL;
+    }
 
-    return check_bytes(&out[0], out_len, &expect[0], (uint32_t)sizeof(expect),
-                       "test_ts_not_leaked");
+    return check_bytes(&out[0], out_len, &expect[0], expect_len, "test_logcat_real");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -210,9 +280,9 @@ int main(void)
     int32_t failed = 0;
 
     failed += test_basic_window();
-    failed += test_nospace_zero_lines();
+    failed += test_zero_lines_noise();
     failed += test_rehit_flush();
-    failed += test_ts_not_leaked();
+    failed += test_logcat_real();
 
     if (failed == 0) {
         printf("[PASS] all proto_cap tests passed\n");
