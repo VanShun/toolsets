@@ -176,17 +176,16 @@ static uint32_t build_report(wchar_t *p_hex)
     put16(buf, &pos, 600u);        /* 车速 60.0 */
     put32(buf, &pos, 123456u);     /* 里程 12345.6 */
     put16(buf, &pos, 3500u);       /* 总压 350.0 */
-    put16(buf, &pos, 30000u);      /* 总流 0.0 */
+    put16(buf, &pos, 10000u);      /* 总流 0.0(2016偏移1000A) */
     put8(buf, &pos, 85u);          /* SOC 85% */
     put8(buf, &pos, 0x01u);        /* DC-DC 工作 */
     put8(buf, &pos, 0x0Eu);        /* 自动D挡 */
     put16(buf, &pos, 3000u);       /* 绝缘 3000kΩ */
     put16(buf, &pos, 0xBEEFu);     /* 2016版: 绝缘后2字节预留字段 */
 
-    /* 位置数据 */
+    /* 位置数据(2016表14: 无坐标系字节) */
     put8(buf, &pos, 0x05u);
     put8(buf, &pos, 0x02u);        /* 无效+南纬+西经 */
-    put8(buf, &pos, 0x01u);        /* WGS84 */
     put32(buf, &pos, 121473700u);  /* 经度 121.4737 */
     put32(buf, &pos, 31247800u);   /* 纬度 31.2478 */
 
@@ -276,7 +275,7 @@ static int32_t test_report(void)
         printf("[FAIL] test_report: SOC missing\n");
         return TEST_FAIL;
     }
-    if (wcsstr(&g_out[0], L"总电流: 30000 (0x7530) = 0.0 A") == NULL) {
+    if (wcsstr(&g_out[0], L"总电流: 10000 (0x2710) = 0.0 A") == NULL) {
         printf("[FAIL] test_report: current offset conversion wrong\n");
         return TEST_FAIL;
     }
@@ -381,6 +380,149 @@ static int32_t test_errors(void)
 }
 
 /**
+ * @brief   构造2016版完整上报帧(电机+极值+报警, 2016版字段布局)
+ * @param   p_hex [out] hex文本输出(宽字符)
+ * @return  帧字节数
+ */
+static uint32_t build_report_2016_full(wchar_t *p_hex)
+{
+    uint8_t buf[512u];
+    uint32_t pos = 0u;
+    uint32_t data_len = 0u;
+    uint32_t i = 0u;
+    const char *vin = "LSGAB1234DE567890";
+
+    put8(buf, &pos, 0x23u);
+    put8(buf, &pos, 0x23u);        /* 2016版 */
+    put8(buf, &pos, 0x02u);        /* 实时上报 */
+    put8(buf, &pos, 0xFEu);
+    for (i = 0u; i < 17u; i++) {
+        put8(buf, &pos, (uint8_t)vin[i]);
+    }
+    put8(buf, &pos, 0x01u);
+    put16(buf, &pos, 0u);
+
+    put8(buf, &pos, 26u); put8(buf, &pos, 6u); put8(buf, &pos, 15u);
+    put8(buf, &pos, 13u); put8(buf, &pos, 45u); put8(buf, &pos, 30u);
+
+    /* 驱动电机(2016表11): 个数1 + [序号1 状态1 控温1 转速2 转矩2 温度1 电压2 电流2] */
+    put8(buf, &pos, 0x02u);        /* 信息类型 */
+    put8(buf, &pos, 1u);           /* 电机个数 */
+    put8(buf, &pos, 1u);           /* 序号 */
+    put8(buf, &pos, 0x01u);        /* 耗电 */
+    put8(buf, &pos, 60u);          /* 控温 20℃(偏移40) */
+    put16(buf, &pos, 21500u);      /* 转速 1500(偏移20000) */
+    put16(buf, &pos, 20500u);      /* 转矩 50.0N·m(偏移2000) */
+    put8(buf, &pos, 70u);          /* 电机温度 30℃ */
+    put16(buf, &pos, 3360u);       /* 输入电压 336.0V */
+    put16(buf, &pos, 10500u);      /* 母线电流 50.0A(偏移1000) */
+
+    /* 极值数据(2016表16, 12字节) */
+    put8(buf, &pos, 0x06u);
+    put8(buf, &pos, 1u);           /* 最高压子系统 */
+    put8(buf, &pos, 12u);          /* 单体代号 */
+    put16(buf, &pos, 3650u);       /* 最高 3.650V */
+    put8(buf, &pos, 1u);
+    put8(buf, &pos, 7u);
+    put16(buf, &pos, 3480u);       /* 最低 3.480V */
+    put8(buf, &pos, 2u);           /* 最高温子系统 */
+    put8(buf, &pos, 3u);           /* 探针 */
+    put8(buf, &pos, 85u);          /* 45℃ */
+    put8(buf, &pos, 2u);
+    put8(buf, &pos, 5u);
+    put8(buf, &pos, 60u);          /* 20℃ */
+
+    /* 报警数据(2016表17: 无2025的通用报警N5尾段) */
+    put8(buf, &pos, 0x07u);
+    put8(buf, &pos, 1u);           /* 等级1 */
+    put32(buf, &pos, 0x00001830u); /* bit4(SOC低)+bit11(绝缘)+bit12(DC-DC温度) */
+    put8(buf, &pos, 1u);           /* 储能故障数 */
+    put32(buf, &pos, 0x12345678u);
+    put8(buf, &pos, 0u);           /* 电机故障数 */
+    put8(buf, &pos, 0u);           /* 发动机故障数 */
+    put8(buf, &pos, 0u);           /* 其他故障数 */
+
+    data_len = pos - 24u;
+    finish_frame(buf, &pos, data_len);
+
+    for (i = 0u; i < pos; i++) {
+        (void)wsprintfW(&p_hex[i * 2u], L"%02X", (unsigned int)buf[i]);
+    }
+
+    return pos;
+}
+
+/**
+ * @brief   测试2016版完整布局: 电机(2016字段)/极值数据/报警(无N5尾段)
+ * @param   无
+ * @return  0: 通过; 1: 失败
+ */
+static int32_t test_report_2016_full(void)
+{
+    wchar_t hex[1024u];
+    uint32_t frames = 0u;
+
+    memset(&hex[0], 0, sizeof(hex));
+    (void)build_report_2016_full(&hex[0]);
+    frames = gb32960_parse_text(&hex[0], &g_out[0], TEST_OUT_MAX);
+
+    if (frames != 1u) {
+        printf("[FAIL] test_2016_full: frames=%u\n", (unsigned int)frames);
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"◆ 极值数据 (0x06)") == NULL) {
+        printf("[FAIL] test_2016_full: extreme header missing\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"◆ 报警数据 (0x07)") == NULL) {
+        printf("[FAIL] test_2016_full: alarm at 0x07 missing\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"转速: 21500 (0x53FC) = 1500 r/min") == NULL) {
+        printf("[FAIL] test_2016_full: motor speed offset wrong\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"转矩: 20500 (0x5014) = 50.0 N·m") == NULL) {
+        printf("[FAIL] test_2016_full: motor torque WORD wrong\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"电机控制器输入电压: 3360 (0x0D20) = 336.0 V") == NULL) {
+        printf("[FAIL] test_2016_full: motor input voltage missing\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"电机控制器直流母线电流: 10500 (0x2904) = 50.0 A") == NULL) {
+        printf("[FAIL] test_2016_full: motor bus current missing\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"电池单体电压最高值: 3650 (0x0E42) = 3.650 V") == NULL) {
+        printf("[FAIL] test_2016_full: extreme hv wrong\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"▲ [bit4] SOC低报警") == NULL) {
+        printf("[FAIL] test_2016_full: alarm bit4 missing\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"▲ [bit11] 绝缘报警") == NULL) {
+        printf("[FAIL] test_2016_full: alarm bit11(2016名) missing\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"故障码1: 0x12345678") == NULL) {
+        printf("[FAIL] test_2016_full: fault code missing\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"通用报警故障数") != NULL) {
+        printf("[FAIL] test_2016_full: 2025-only N5 tail present in 2016\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"坐标系") != NULL) {
+        printf("[FAIL] test_2016_full: 2025-only coord field present in 2016\n");
+        return TEST_FAIL;
+    }
+
+    return TEST_PASS;
+}
+
+/**
  * @brief   测试节点树接口: 切帧/单帧节点解析/帧标志/文本物化
  * @param   无
  * @return  0: 通过; 1: 失败
@@ -465,6 +607,81 @@ static int32_t test_nodes(void)
 }
 
 /**
+ * @brief   测试2016版车辆登入(子系统数n + 编码长度m + n×m编码)
+ * @param   无
+ * @return  0: 通过; 1: 失败
+ */
+static int32_t test_login_2016(void)
+{
+    uint8_t buf[256u];
+    wchar_t hex[768u];
+    uint32_t pos = 0u;
+    uint32_t data_len = 0u;
+    uint32_t i = 0u;
+    uint32_t frames = 0u;
+    const char *vin = "LSGAB1234DE567890";
+
+    memset(&hex[0], 0, sizeof(hex));
+    memset(&buf[0], 0, sizeof(buf));
+    put8(buf, &pos, 0x23u);
+    put8(buf, &pos, 0x23u);        /* 2016版 */
+    put8(buf, &pos, 0x01u);        /* 车辆登入 */
+    put8(buf, &pos, 0xFEu);
+    for (i = 0u; i < 17u; i++) {
+        put8(buf, &pos, (uint8_t)vin[i]);
+    }
+    put8(buf, &pos, 0x01u);
+    put16(buf, &pos, 0u);
+    put8(buf, &pos, 26u); put8(buf, &pos, 6u); put8(buf, &pos, 15u);
+    put8(buf, &pos, 12u); put8(buf, &pos, 30u); put8(buf, &pos, 0u);
+    put16(buf, &pos, 1u);          /* 流水号 */
+    for (i = 0u; i < 20u; i++) {
+        put8(buf, &pos, (uint8_t)('0' + (i % 10u)));   /* ICCID */
+    }
+    put8(buf, &pos, 2u);           /* 子系统数 n=2 */
+    put8(buf, &pos, 7u);           /* 编码长度 m=7 */
+    for (i = 0u; i < 7u; i++) {
+        put8(buf, &pos, (uint8_t)('A' + i));           /* 子系统1编码 */
+    }
+    for (i = 0u; i < 7u; i++) {
+        put8(buf, &pos, (uint8_t)('H' + i));           /* 子系统2编码 */
+    }
+    data_len = pos - 24u;
+    finish_frame(buf, &pos, data_len);
+    for (i = 0u; i < pos; i++) {
+        (void)wsprintfW(&hex[i * 2u], L"%02X", (unsigned int)buf[i]);
+    }
+
+    frames = gb32960_parse_text(&hex[0], &g_out[0], TEST_OUT_MAX);
+    if (frames != 1u) {
+        printf("[FAIL] test_login_2016: frames=%u\n", (unsigned int)frames);
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"2016版") == NULL) {
+        printf("[FAIL] test_login_2016: version not detected\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"可充电储能子系统数: 2") == NULL) {
+        printf("[FAIL] test_login_2016: subsystem count missing\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"可充电储能系统编码长度: 7") == NULL) {
+        printf("[FAIL] test_login_2016: code length missing\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"子系统1编码: ABCDEFG") == NULL) {
+        printf("[FAIL] test_login_2016: subsystem code 1 wrong\n");
+        return TEST_FAIL;
+    }
+    if (wcsstr(&g_out[0], L"子系统2编码: HIJKLMN") == NULL) {
+        printf("[FAIL] test_login_2016: subsystem code 2 wrong\n");
+        return TEST_FAIL;
+    }
+
+    return TEST_PASS;
+}
+
+/**
  * @brief   测试入口
  * @param   无
  * @return  0: 全部通过; 1: 存在失败
@@ -477,6 +694,8 @@ int main(void)
     failed += test_report();
     failed += test_errors();
     failed += test_nodes();
+    failed += test_login_2016();
+    failed += test_report_2016_full();
 
     if (failed == 0) {
         printf("[PASS] all gb32960 tests passed\n");

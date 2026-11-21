@@ -500,7 +500,12 @@ static void parse_vehicle(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
     out_line(p_ctx, indent, line);
     fmt_word(line, L"总电压", volt, 100, 0, 1, L"V");
     out_line(p_ctx, indent, line);
-    fmt_word(line, L"总电流", curr, 100, 30000, 1, L"A");
+    /* 总电流偏移: 2016版1000A(偏移10000), 2025版3000A(偏移30000) */
+    if (p_cur->ver2016 != 0u) {
+        fmt_word(line, L"总电流", curr, 100, 10000, 1, L"A");
+    } else {
+        fmt_word(line, L"总电流", curr, 100, 30000, 1, L"A");
+    }
     out_line(p_ctx, indent, line);
     (void)wsprintfW(line, L"SOC: %u%%", (unsigned int)soc);
     out_line(p_ctx, indent, line);
@@ -539,8 +544,7 @@ static void parse_motors(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
         uint8_t st = rd_u8(p_cur);
         uint8_t ctl_temp = rd_u8(p_cur);
         uint16_t speed = rd_u16(p_cur);
-        uint32_t torque = rd_u32(p_cur);
-        uint8_t motor_temp = rd_u8(p_cur);
+        uint16_t motor_temp = 0u;
 
         (void)wsprintfW(line, L"— 电机%u —", (unsigned int)(i + 1u));
         out_line(p_ctx, indent, line);
@@ -549,12 +553,38 @@ static void parse_motors(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
         out_line(p_ctx, indent + 1u, line);
         fmt_temp(line, L"控制器温度", ctl_temp);
         out_line(p_ctx, indent + 1u, line);
-        fmt_word(line, L"转速", speed, 1, 32000, 0, L"r/min");
-        out_line(p_ctx, indent + 1u, line);
-        fmt_dword(line, L"转矩", torque, 100, 200000, 1, L"N·m");
-        out_line(p_ctx, indent + 1u, line);
-        fmt_temp(line, L"电机温度", motor_temp);
-        out_line(p_ctx, indent + 1u, line);
+        if (p_cur->ver2016 != 0u) {
+            /* 2016表11: 转速偏移20000, 转矩WORD偏移2000N·m,
+               且带 控制器输入电压2B + 直流母线电流2B */
+            uint16_t torque = rd_u16(p_cur);
+            uint16_t in_volt = 0u;
+            uint16_t bus_curr = 0u;
+
+            fmt_word(line, L"转速", speed, 1000, 20000, 0, L"r/min");
+            out_line(p_ctx, indent + 1u, line);
+            fmt_word(line, L"转矩", torque, 100, 20000, 1, L"N·m");
+            out_line(p_ctx, indent + 1u, line);
+            motor_temp = rd_u8(p_cur);
+            in_volt = rd_u16(p_cur);
+            bus_curr = rd_u16(p_cur);
+            fmt_temp(line, L"电机温度", (uint8_t)motor_temp);
+            out_line(p_ctx, indent + 1u, line);
+            fmt_word(line, L"电机控制器输入电压", in_volt, 100, 0, 1, L"V");
+            out_line(p_ctx, indent + 1u, line);
+            fmt_word(line, L"电机控制器直流母线电流", bus_curr, 100, 10000, 1, L"A");
+            out_line(p_ctx, indent + 1u, line);
+        } else {
+            /* 2025表: 转速偏移32000, 转矩DWORD偏移20000N·m, 无电压电流字段 */
+            uint32_t torque = rd_u32(p_cur);
+
+            fmt_word(line, L"转速", speed, 1000, 32000, 0, L"r/min");
+            out_line(p_ctx, indent + 1u, line);
+            fmt_dword(line, L"转矩", torque, 100, 200000, 1, L"N·m");
+            out_line(p_ctx, indent + 1u, line);
+            motor_temp = rd_u8(p_cur);
+            fmt_temp(line, L"电机温度", (uint8_t)motor_temp);
+            out_line(p_ctx, indent + 1u, line);
+        }
     }
 }
 
@@ -568,40 +598,93 @@ static void parse_motors(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
 static void parse_fuel_cell(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
 {
     wchar_t line[GB_LINE_MAX];
-    uint16_t temp = rd_u16(p_cur);
-    uint8_t probe = rd_u8(p_cur);
-    uint16_t conc = rd_u16(p_cur);
-    uint8_t sensor = rd_u8(p_cur);
-    uint16_t press = rd_u16(p_cur);
-    uint8_t press_sensor = rd_u8(p_cur);
-    uint8_t dcdc = rd_u8(p_cur);
-    uint8_t remain = rd_u8(p_cur);
-    uint8_t ctl_temp = rd_u8(p_cur);
 
-    fmt_word(line, L"氢系统最高温度", temp, 1, 40, 0, L"℃");
-    out_line(p_ctx, indent, line);
-    (void)wsprintfW(line, L"最高温度探针序号: %u", (unsigned int)probe);
-    out_line(p_ctx, indent, line);
-    if (conc == 0xFFFFu) {
-        out_line(p_ctx, indent, L"氢气最高浓度: 0xFFFF (无效)");
-    } else if (conc == 0xFFFEu) {
-        out_line(p_ctx, indent, L"氢气最高浓度: 0xFFFE (异常)");
-    } else {
-        (void)wsprintfW(line, L"氢气最高浓度: %u = %u.%04u %%", (unsigned int)conc,
-                        (unsigned int)(conc / 10000u), (unsigned int)(conc % 10000u));
+    if (p_cur->ver2016 != 0u) {
+        /* 2016表12: 电压2 电流2 燃耗率2 探针总数2(WORD) 探针N×1
+           氢温2 代号1 氢浓2 代号1 氢压2 代号1 DCDC状态1 */
+        uint16_t volt = rd_u16(p_cur);
+        uint16_t curr = rd_u16(p_cur);
+        uint16_t consume = rd_u16(p_cur);
+        uint16_t probe_n = rd_u16(p_cur);
+        uint16_t h_temp = 0u;
+        uint16_t conc = 0u;
+        uint16_t press = 0u;
+        uint32_t i = 0u;
+
+        fmt_word(line, L"燃料电池电压", volt, 100, 0, 1, L"V");
+        out_line(p_ctx, indent, line);
+        fmt_word(line, L"燃料电池电流", curr, 100, 0, 1, L"A");
+        out_line(p_ctx, indent, line);
+        fmt_word(line, L"燃料消耗率", consume, 10, 0, 2, L"kg/100km");
+        out_line(p_ctx, indent, line);
+        (void)wsprintfW(line, L"燃料电池温度探针总数: %u", (unsigned int)probe_n);
+        out_line(p_ctx, indent, line);
+        for (i = 0u; (i < probe_n) && (i < (GB_LIST_MAX * 8u)); i++) {
+            uint8_t t = rd_u8(p_cur);
+            wchar_t name[32u];
+
+            (void)wsprintfW(&name[0], L"探针%u温度", (unsigned int)(i + 1u));
+            fmt_temp(line, &name[0], t);
+            out_line(p_ctx, indent + 1u, line);
+        }
+        h_temp = rd_u16(p_cur);
+        fmt_word(line, L"氢系统中最高温度", h_temp, 100, 400, 1, L"℃");
+        out_line(p_ctx, indent, line);
+        (void)wsprintfW(line, L"最高温度探针代号: %u", (unsigned int)rd_u8(p_cur));
+        out_line(p_ctx, indent, line);
+        conc = rd_u16(p_cur);
+        fmt_word(line, L"氢气最高浓度", conc, 1000, 0, 0, L"mg/kg");
+        out_line(p_ctx, indent, line);
+        (void)wsprintfW(line, L"最高浓度传感器代号: %u", (unsigned int)rd_u8(p_cur));
+        out_line(p_ctx, indent, line);
+        press = rd_u16(p_cur);
+        fmt_word(line, L"氢气最高压力", press, 100, 0, 1, L"MPa");
+        out_line(p_ctx, indent, line);
+        (void)wsprintfW(line, L"最高压力传感器代号: %u", (unsigned int)rd_u8(p_cur));
+        out_line(p_ctx, indent, line);
+        (void)wsprintfW(line, L"高压DC/DC状态: 0x%02X", (unsigned int)rd_u8(p_cur));
+        out_line(p_ctx, indent, line);
+        return;
+    }
+
+    /* 2025表(燃料电池发动机及车载氢系统): 氢温2 探针1 氢浓2 传感1
+       氢压2 传感1 DCDC1 剩余氢量1 控温1 */
+    {
+        uint16_t temp = rd_u16(p_cur);
+        uint8_t probe = rd_u8(p_cur);
+        uint16_t conc = rd_u16(p_cur);
+        uint8_t sensor = rd_u8(p_cur);
+        uint16_t press = rd_u16(p_cur);
+        uint8_t press_sensor = rd_u8(p_cur);
+        uint8_t dcdc = rd_u8(p_cur);
+        uint8_t remain = rd_u8(p_cur);
+        uint8_t ctl_temp = rd_u8(p_cur);
+
+        fmt_word(line, L"氢系统最高温度", temp, 100, 400, 1, L"℃");
+        out_line(p_ctx, indent, line);
+        (void)wsprintfW(line, L"最高温度探针序号: %u", (unsigned int)probe);
+        out_line(p_ctx, indent, line);
+        if (conc == 0xFFFFu) {
+            out_line(p_ctx, indent, L"氢气最高浓度: 0xFFFF (无效)");
+        } else if (conc == 0xFFFEu) {
+            out_line(p_ctx, indent, L"氢气最高浓度: 0xFFFE (异常)");
+        } else {
+            (void)wsprintfW(line, L"氢气最高浓度: %u = %u.%04u %%", (unsigned int)conc,
+                            (unsigned int)(conc / 10000u), (unsigned int)(conc % 10000u));
+            out_line(p_ctx, indent, line);
+        }
+        (void)wsprintfW(line, L"最高浓度传感器序号: %u", (unsigned int)sensor);
+        out_line(p_ctx, indent, line);
+        fmt_word(line, L"氢气最高压力", press, 100, 0, 1, L"MPa");
+        out_line(p_ctx, indent, line);
+        (void)wsprintfW(line, L"最高压力传感器序号: %u", (unsigned int)press_sensor);
+        out_line(p_ctx, indent, line);
+        (void)wsprintfW(line, L"DC-DC状态: 0x%02X  剩余氢量: %u%%",
+                        (unsigned int)dcdc, (unsigned int)remain);
+        out_line(p_ctx, indent, line);
+        fmt_temp(line, L"DC-DC控制器温度", ctl_temp);
         out_line(p_ctx, indent, line);
     }
-    (void)wsprintfW(line, L"最高浓度传感器序号: %u", (unsigned int)sensor);
-    out_line(p_ctx, indent, line);
-    fmt_word(line, L"氢气最高压力", press, 100, 0, 1, L"MPa");
-    out_line(p_ctx, indent, line);
-    (void)wsprintfW(line, L"最高压力传感器序号: %u", (unsigned int)press_sensor);
-    out_line(p_ctx, indent, line);
-    (void)wsprintfW(line, L"DC-DC状态: 0x%02X  剩余氢量: %u%%",
-                    (unsigned int)dcdc, (unsigned int)remain);
-    out_line(p_ctx, indent, line);
-    fmt_temp(line, L"DC-DC控制器温度", ctl_temp);
-    out_line(p_ctx, indent, line);
 }
 
 /**
@@ -614,10 +697,29 @@ static void parse_fuel_cell(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
 static void parse_engine(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
 {
     wchar_t line[GB_LINE_MAX];
-    uint16_t speed = rd_u16(p_cur);
 
-    (void)wsprintfW(line, L"曲轴转速: %u r/min", (unsigned int)speed);
-    out_line(p_ctx, indent, line);
+    if (p_cur->ver2016 != 0u) {
+        /* 2016表13: 状态1 曲轴转速2 燃料消耗率2 */
+        uint8_t st = rd_u8(p_cur);
+        uint16_t speed = rd_u16(p_cur);
+        uint16_t consume = rd_u16(p_cur);
+
+        (void)wsprintfW(line, L"发动机状态: 0x%02X", (unsigned int)st);
+        out_line(p_ctx, indent, line);
+        (void)wsprintfW(line, L"曲轴转速: %u r/min", (unsigned int)speed);
+        out_line(p_ctx, indent, line);
+        fmt_word(line, L"燃料消耗率", consume, 10, 0, 2, L"L/100km");
+        out_line(p_ctx, indent, line);
+        return;
+    }
+
+    /* 2025表: 仅曲轴转速2 */
+    {
+        uint16_t speed = rd_u16(p_cur);
+
+        (void)wsprintfW(line, L"曲轴转速: %u r/min", (unsigned int)speed);
+        out_line(p_ctx, indent, line);
+    }
 }
 
 /**
@@ -631,9 +733,9 @@ static void parse_location(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
 {
     wchar_t line[GB_LINE_MAX];
     uint8_t status = rd_u8(p_cur);
-    uint8_t coord = rd_u8(p_cur);
-    uint32_t lon = rd_u32(p_cur);
-    uint32_t lat = rd_u32(p_cur);
+    uint8_t coord = 0u;
+    uint32_t lon = 0u;
+    uint32_t lat = 0u;
     const wchar_t *valid = ((status & 0x01u) == 0u) ? L"有效" : L"无效";
     const wchar_t *ns = ((status & 0x02u) != 0u) ? L"南纬" : L"北纬";
     const wchar_t *ew = ((status & 0x04u) != 0u) ? L"西经" : L"东经";
@@ -641,8 +743,14 @@ static void parse_location(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
     (void)wsprintfW(line, L"定位状态: 0x%02X (%s, %s, %s)",
                     (unsigned int)status, valid, ns, ew);
     out_line(p_ctx, indent, line);
-    (void)wsprintfW(line, L"坐标系: 0x%02X", (unsigned int)coord);
-    out_line(p_ctx, indent, line);
+    if (p_cur->ver2016 == 0u) {
+        /* 2025表: 定位状态后多1字节坐标系; 2016表14无此字段 */
+        coord = rd_u8(p_cur);
+        (void)wsprintfW(line, L"坐标系: 0x%02X", (unsigned int)coord);
+        out_line(p_ctx, indent, line);
+    }
+    lon = rd_u32(p_cur);
+    lat = rd_u32(p_cur);
     if (lon == 0xFFFFFFFFu) {
         out_line(p_ctx, indent, L"经度: 0xFFFFFFFF (无效)");
     } else if (lon == 0xFFFFFFFEu) {
@@ -672,7 +780,7 @@ static void parse_location(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
  */
 static void parse_alarm(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
 {
-    static const wchar_t *const alarm_names[28u] =
+    static const wchar_t *const alarm_names_2025[28u] =
     {
         L"温度差异报警", L"电池高温报警", L"储能装置过压报警", L"储能装置欠压报警",
         L"SOC低报警", L"单体过压报警", L"单体欠压报警", L"SOC过高报警",
@@ -682,25 +790,32 @@ static void parse_alarm(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
         L"驱动电机过流报警", L"超级电容过温报警", L"超级电容过压报警", L"储能装置热事件报警",
         L"氢气泄漏异常报警", L"氢系统压力异常报警", L"氢系统温度异常报警", L"燃料电池电堆超温报警"
     };
+    static const wchar_t *const alarm_names_2016[19u] =
+    {
+        L"温度差异报警", L"电池高温报警", L"车载储能装置过压报警", L"车载储能装置欠压报警",
+        L"SOC低报警", L"单体电池过压报警", L"单体电池欠压报警", L"SOC过高报警",
+        L"SOC跳变报警", L"可充电储能系统不匹配报警", L"电池单体一致性差报警", L"绝缘报警",
+        L"DC-DC温度报警", L"制动系统报警", L"DC-DC状态报警", L"驱动电机控制器温度报警",
+        L"高压互锁状态报警", L"驱动电机温度报警", L"车载储能装置过充报警"
+    };
     wchar_t line[GB_LINE_MAX];
     uint8_t level = rd_u8(p_cur);
     uint32_t flags = rd_u32(p_cur);
-    uint8_t batt_n = rd_u8(p_cur);
-    uint8_t motor_n = rd_u8(p_cur);
-    uint8_t eng_n = rd_u8(p_cur);
-    uint8_t other_n = rd_u8(p_cur);
-    uint8_t general_n = rd_u8(p_cur);
     uint32_t i = 0u;
     uint32_t bit = 0u;
     uint32_t alarm_cnt = 0u;
+    uint32_t name_max = (p_cur->ver2016 != 0u) ? 19u : 28u;
 
     (void)wsprintfW(line, L"最高报警等级: %u", (unsigned int)level);
     out_line(p_ctx, indent, line);
     (void)wsprintfW(line, L"通用报警标志: 0x%08X", (unsigned int)flags);
     out_line(p_ctx, indent, line);
-    for (bit = 0u; bit < 28u; bit++) {
+    for (bit = 0u; bit < name_max; bit++) {
+        const wchar_t *p_name = (p_cur->ver2016 != 0u) ? alarm_names_2016[bit]
+                                                       : alarm_names_2025[bit];
+
         if (((flags >> bit) & 0x01u) != 0u) {
-            (void)wsprintfW(line, L"▲ [bit%u] %s", (unsigned int)bit, alarm_names[bit]);
+            (void)wsprintfW(line, L"▲ [bit%u] %s", (unsigned int)bit, p_name);
             out_line(p_ctx, indent + 1u, line);
             alarm_cnt++;
         }
@@ -708,43 +823,112 @@ static void parse_alarm(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
     if (alarm_cnt == 0u) {
         out_line(p_ctx, indent + 1u, L"(无通用报警)");
     }
-    (void)wsprintfW(line, L"可充电储能装置故障数: %u", (unsigned int)batt_n);
-    out_line(p_ctx, indent, line);
-    for (i = 0u; (i < batt_n) && (i < GB_LIST_MAX); i++) {
-        (void)wsprintfW(line, L"故障码%u: 0x%08X", (unsigned int)(i + 1u),
-                        (unsigned int)rd_u32(p_cur));
-        out_line(p_ctx, indent + 1u, line);
-    }
-    (void)wsprintfW(line, L"驱动电机故障数: %u", (unsigned int)motor_n);
-    out_line(p_ctx, indent, line);
-    for (i = 0u; (i < motor_n) && (i < GB_LIST_MAX); i++) {
-        (void)wsprintfW(line, L"故障码%u: 0x%08X", (unsigned int)(i + 1u),
-                        (unsigned int)rd_u32(p_cur));
-        out_line(p_ctx, indent + 1u, line);
-    }
-    (void)wsprintfW(line, L"发动机故障数: %u", (unsigned int)eng_n);
-    out_line(p_ctx, indent, line);
-    for (i = 0u; (i < eng_n) && (i < GB_LIST_MAX); i++) {
-        (void)wsprintfW(line, L"故障码%u: 0x%08X", (unsigned int)(i + 1u),
-                        (unsigned int)rd_u32(p_cur));
-        out_line(p_ctx, indent + 1u, line);
-    }
-    (void)wsprintfW(line, L"其他故障数: %u", (unsigned int)other_n);
-    out_line(p_ctx, indent, line);
-    for (i = 0u; (i < other_n) && (i < GB_LIST_MAX); i++) {
-        (void)wsprintfW(line, L"故障码%u: 0x%08X", (unsigned int)(i + 1u),
-                        (unsigned int)rd_u32(p_cur));
-        out_line(p_ctx, indent + 1u, line);
-    }
-    (void)wsprintfW(line, L"通用报警故障数: %u", (unsigned int)general_n);
-    out_line(p_ctx, indent, line);
-    for (i = 0u; (i < general_n) && (i < GB_LIST_MAX); i++) {
-        uint8_t idx = rd_u8(p_cur);
-        uint8_t lv = rd_u8(p_cur);
+    /* 注意: 各故障总数与其代码列表是"计数+列表"逐段交错排列,
+       不是4个计数连排(计数非0时连排读取会整体错位) */
+    {
+        uint8_t batt_n = rd_u8(p_cur);
 
-        (void)wsprintfW(line, L"[bit%u] 等级%u", (unsigned int)idx, (unsigned int)lv);
-        out_line(p_ctx, indent + 1u, line);
+        (void)wsprintfW(line, L"可充电储能装置故障数: %u", (unsigned int)batt_n);
+        out_line(p_ctx, indent, line);
+        for (i = 0u; (i < batt_n) && (i < GB_LIST_MAX); i++) {
+            (void)wsprintfW(line, L"故障码%u: 0x%08X", (unsigned int)(i + 1u),
+                            (unsigned int)rd_u32(p_cur));
+            out_line(p_ctx, indent + 1u, line);
+        }
     }
+    {
+        uint8_t motor_n = rd_u8(p_cur);
+
+        (void)wsprintfW(line, L"驱动电机故障数: %u", (unsigned int)motor_n);
+        out_line(p_ctx, indent, line);
+        for (i = 0u; (i < motor_n) && (i < GB_LIST_MAX); i++) {
+            (void)wsprintfW(line, L"故障码%u: 0x%08X", (unsigned int)(i + 1u),
+                            (unsigned int)rd_u32(p_cur));
+            out_line(p_ctx, indent + 1u, line);
+        }
+    }
+    {
+        uint8_t eng_n = rd_u8(p_cur);
+
+        (void)wsprintfW(line, L"发动机故障数: %u", (unsigned int)eng_n);
+        out_line(p_ctx, indent, line);
+        for (i = 0u; (i < eng_n) && (i < GB_LIST_MAX); i++) {
+            (void)wsprintfW(line, L"故障码%u: 0x%08X", (unsigned int)(i + 1u),
+                            (unsigned int)rd_u32(p_cur));
+            out_line(p_ctx, indent + 1u, line);
+        }
+    }
+    {
+        uint8_t other_n = rd_u8(p_cur);
+
+        (void)wsprintfW(line, L"其他故障数: %u", (unsigned int)other_n);
+        out_line(p_ctx, indent, line);
+        for (i = 0u; (i < other_n) && (i < GB_LIST_MAX); i++) {
+            (void)wsprintfW(line, L"故障码%u: 0x%08X", (unsigned int)(i + 1u),
+                            (unsigned int)rd_u32(p_cur));
+            out_line(p_ctx, indent + 1u, line);
+        }
+    }
+    if (p_cur->ver2016 == 0u) {
+        /* 2025表23: 报警尾段多 通用报警故障总数N5 + 2×N5(位序号+等级);
+           2016表17到其他故障列表为止 */
+        uint8_t general_n = rd_u8(p_cur);
+
+        (void)wsprintfW(line, L"通用报警故障数: %u", (unsigned int)general_n);
+        out_line(p_ctx, indent, line);
+        for (i = 0u; (i < general_n) && (i < GB_LIST_MAX); i++) {
+            uint8_t idx = rd_u8(p_cur);
+            uint8_t lv = rd_u8(p_cur);
+
+            (void)wsprintfW(line, L"[bit%u] 等级%u", (unsigned int)idx, (unsigned int)lv);
+            out_line(p_ctx, indent + 1u, line);
+        }
+    }
+}
+
+/**
+ * @brief   解析极值数据(2016版 0x06, 表16: 12字节定长)
+ * @param   p_cur   游标
+ * @param   p_ctx   输出
+ * @param   indent  缩进
+ * @return  无
+ */
+static void parse_extreme(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
+{
+    wchar_t line[GB_LINE_MAX];
+    uint8_t hv_sys = rd_u8(p_cur);
+    uint8_t hv_cell = rd_u8(p_cur);
+    uint16_t hv_val = rd_u16(p_cur);
+    uint8_t lv_sys = rd_u8(p_cur);
+    uint8_t lv_cell = rd_u8(p_cur);
+    uint16_t lv_val = rd_u16(p_cur);
+    uint8_t ht_sys = rd_u8(p_cur);
+    uint8_t ht_probe = rd_u8(p_cur);
+    uint8_t ht_val = rd_u8(p_cur);
+    uint8_t lt_sys = rd_u8(p_cur);
+    uint8_t lt_probe = rd_u8(p_cur);
+    uint8_t lt_val = rd_u8(p_cur);
+
+    (void)wsprintfW(line, L"最高电压电池子系统号: %u  单体代号: %u",
+                    (unsigned int)hv_sys, (unsigned int)hv_cell);
+    out_line(p_ctx, indent, line);
+    fmt_word(line, L"电池单体电压最高值", hv_val, 1, 0, 3, L"V");
+    out_line(p_ctx, indent, line);
+    (void)wsprintfW(line, L"最低电压电池子系统号: %u  单体代号: %u",
+                    (unsigned int)lv_sys, (unsigned int)lv_cell);
+    out_line(p_ctx, indent, line);
+    fmt_word(line, L"电池单体电压最低值", lv_val, 1, 0, 3, L"V");
+    out_line(p_ctx, indent, line);
+    (void)wsprintfW(line, L"最高温度子系统号: %u  探针序号: %u",
+                    (unsigned int)ht_sys, (unsigned int)ht_probe);
+    out_line(p_ctx, indent, line);
+    fmt_temp(line, L"最高温度值", ht_val);
+    out_line(p_ctx, indent, line);
+    (void)wsprintfW(line, L"最低温度子系统号: %u  探针序号: %u",
+                    (unsigned int)lt_sys, (unsigned int)lt_probe);
+    out_line(p_ctx, indent, line);
+    fmt_temp(line, L"最低温度值", lt_val);
+    out_line(p_ctx, indent, line);
 }
 
 /**
@@ -860,13 +1044,72 @@ static void parse_batt_temp(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
  * @param   indent  缩进
  * @return  无
  */
+/**
+ * @brief   信息类型描述(版本感知: 2016的0x06=极值/0x07=报警, 2025相反)
+ * @param   v       信息类型编码
+ * @param   ver2016 1=2016版
+ * @return  描述文本
+ */
+static const wchar_t *info_desc_v(uint8_t v, uint8_t ver2016)
+{
+    if (ver2016 != 0u) {
+        switch (v)
+        {
+            case 0x06u: return L"极值数据";
+            case 0x07u: return L"报警数据";
+            case 0x08u: return L"终端数据预留";
+            case 0x09u: return L"终端数据预留";
+            default: break;
+        }
+    }
+
+    return info_desc(v);
+}
+
 static void parse_info_body(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint32_t indent)
 {
     uint8_t info_type = rd_u8(p_cur);
     wchar_t line[GB_LINE_MAX];
 
-    (void)wsprintfW(line, L"◆ %s (0x%02X)", info_desc(info_type), (unsigned int)info_type);
+    (void)wsprintfW(line, L"◆ %s (0x%02X)", info_desc_v(info_type, p_cur->ver2016),
+                    (unsigned int)info_type);
     out_line(p_ctx, indent, line);
+
+    if (p_cur->ver2016 != 0u) {
+        switch (info_type)
+        {
+            case 0x01u: parse_vehicle(p_cur, p_ctx, indent + 1u); break;
+            case 0x02u: parse_motors(p_cur, p_ctx, indent + 1u); break;
+            case 0x03u: parse_fuel_cell(p_cur, p_ctx, indent + 1u); break;
+            case 0x04u: parse_engine(p_cur, p_ctx, indent + 1u); break;
+            case 0x05u: parse_location(p_cur, p_ctx, indent + 1u); break;
+            case 0x06u: parse_extreme(p_cur, p_ctx, indent + 1u); break;
+            case 0x07u: parse_alarm(p_cur, p_ctx, indent + 1u); break;
+            default:
+            {
+                uint32_t remain = p_cur->len - p_cur->off;
+                uint32_t show = (remain > 64u) ? 64u : remain;
+                uint32_t i = 0u;
+
+                (void)wsprintfW(line, L"原始数据(前%u/%u字节):", (unsigned int)show,
+                                (unsigned int)remain);
+                out_line(p_ctx, indent + 1u, line);
+                memset(&line[0], 0, sizeof(line));
+                for (i = 0u; i < show; i++) {
+                    wchar_t hex[4u];
+
+                    (void)wsprintfW(&hex[0], L"%02X", (unsigned int)rd_u8(p_cur));
+                    (void)lstrcatW(&line[0], &hex[0]);
+                    if (((i % 32u) == 31u) || ((i + 1u) == show)) {
+                        out_line(p_ctx, indent + 2u, &line[0]);
+                        memset(&line[0], 0, sizeof(line));
+                    }
+                }
+                break;
+            }
+        }
+        return;
+    }
 
     switch (info_type)
     {
@@ -961,7 +1204,27 @@ static void parse_data_unit(GB_CUR_T *p_cur, GB_OUT_T *p_ctx, uint8_t cmd, uint8
             rd_str(p_cur, &txt[0], 64u, 20u);
             (void)wsprintfW(line, L"ICCID: %s", &txt[0]);
             out_line(p_ctx, indent, line);
-            {
+            if (p_cur->ver2016 != 0u) {
+                /* 2016表6: 子系统数n + 编码长度m(全局1个) + n×m编码 */
+                uint8_t sub_n = rd_u8(p_cur);
+                uint8_t code_m = rd_u8(p_cur);
+                uint32_t i = 0u;
+
+                (void)wsprintfW(line, L"可充电储能子系统数: %u", (unsigned int)sub_n);
+                out_line(p_ctx, indent, line);
+                (void)wsprintfW(line, L"可充电储能系统编码长度: %u", (unsigned int)code_m);
+                out_line(p_ctx, indent, line);
+                if (code_m == 0u) {
+                    out_line(p_ctx, indent + 1u, L"(编码长度0, 不上传编码)");
+                }
+                for (i = 0u; (i < sub_n) && (i < GB_LIST_MAX) && (code_m != 0u); i++) {
+                    rd_str(p_cur, &txt[0], 64u, code_m);
+                    (void)wsprintfW(line, L"子系统%u编码: %s",
+                                    (unsigned int)(i + 1u), &txt[0]);
+                    out_line(p_ctx, indent + 1u, line);
+                }
+            } else {
+                /* 2025表6: BMS数 + 每BMS动力蓄电池包个数 + 包编码(24B) */
                 uint8_t bms_n = rd_u8(p_cur);
                 uint32_t i = 0u;
                 uint32_t total = 0u;
