@@ -116,9 +116,11 @@ static HWND gbw_create_child(HWND h_parent, const wchar_t *p_class,
  */
 static void gbw_create_controls(HWND hwnd)
 {
+    /* 输入区: 不带WS_HSCROLL -> 多行EDIT按窗宽软换行(长hex串显示友好);
+       复制取出的是原始文本(软换行不带CRLF, 未用EM_FMTLINES) */
     (void)gbw_create_child(hwnd, L"EDIT",
                            (uint32_t)(ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN |
-                                      WS_VSCROLL | WS_HSCROLL | WS_BORDER),
+                                      WS_VSCROLL | WS_BORDER),
                            GBW_IDC_ED_IN, UI_FONT_KIND_EDIT);
     (void)gbw_create_child(hwnd, L"EDIT",
                            (uint32_t)(ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL |
