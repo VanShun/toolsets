@@ -15,7 +15,7 @@
 /* -------------------------------------------------------------------------- */
 /*  宏定义                                                                     */
 /* -------------------------------------------------------------------------- */
-#define TEST_OUT_MAX      4096u   /**< 输出缓冲宽字符容量 */
+#define TEST_OUT_MAX      DBG_FRAME_OUT_MAX   /**< 输出缓冲宽字符容量(与模块输出容量同步) */
 #define TEST_PASS         0       /**< 单项测试通过 */
 #define TEST_FAIL         1       /**< 单项测试失败 */
 
@@ -212,7 +212,7 @@ static int32_t test_force_split(void)
 
     (void)dbg_frame_feed(&frame, &big[0], (uint32_t)sizeof(big), &opt, &out[0], TEST_OUT_MAX, &pos);
 
-    /* LINE_MAX+8 字节 -> 首行512字节强制断行, 余8字节停在半行 */
+    /* LINE_MAX+8 字节 -> 首行LINE_MAX字节强制断行, 余8字节停在半行 */
     for (i = 0u; i < TEST_OUT_MAX; i++) {
         if (out[i] == L'\r') {
             break;

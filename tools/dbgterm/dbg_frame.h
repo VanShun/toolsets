@@ -15,8 +15,8 @@
 /* -------------------------------------------------------------------------- */
 /*  宏定义                                                                     */
 /* -------------------------------------------------------------------------- */
-#define DBG_FRAME_LINE_MAX      512u     /**< 单行字节容量(超出强制断行) */
-#define DBG_FRAME_OUT_MAX       16384u   /**< 单次输出宽字符容量 */
+#define DBG_FRAME_LINE_MAX      8192u    /**< 单行字节容量(超出强制断行; 覆盖logcat长报文/JSON) */
+#define DBG_FRAME_OUT_MAX       32768u   /**< 单次输出宽字符容量(>=LINE_MAX解码展开+安全余量) */
 #define DBG_FRAME_IDLE_MS       100u     /**< 空闲断行阈值(毫秒) */
 #define DBG_FRAME_OUT_MARGIN    64u      /**< 输出缓冲安全余量(宽字符) */
 
@@ -87,5 +87,12 @@ uint32_t dbg_frame_feed(DBG_FRAME_T *p_frame, const uint8_t *p_data, uint32_t le
  */
 uint32_t dbg_frame_flush_idle(DBG_FRAME_T *p_frame, const DBG_FRAME_OPT_T *p_opt,
                               wchar_t *p_out, uint32_t out_max, uint32_t *p_out_pos);
+
+/**
+ * @brief   查询是否有到达空闲断行条件的半行(无副作用, 供节拍早退判断)
+ * @param   p_frame 装配上下文
+ * @return  1: 半行非空且已空闲超过阈值; 0: 无
+ */
+uint8_t dbg_frame_idle_ready(const DBG_FRAME_T *p_frame);
 
 #endif /* DBG_FRAME_H */

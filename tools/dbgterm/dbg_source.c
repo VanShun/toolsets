@@ -124,6 +124,21 @@ uint32_t dbg_source_rx_take_overflow(DBG_SOURCE_RX_T *p_rx)
     return overflow;
 }
 
+uint8_t dbg_source_rx_has_data(const DBG_SOURCE_RX_T *p_rx)
+{
+    uint8_t has = 0u;
+
+    if (p_rx == NULL) {
+        return 0u;
+    }
+    /* 只读访问, 但临界区 Enter 需可写指针: 结构体本身调用方保证存活 */
+    EnterCriticalSection((CRITICAL_SECTION *)&p_rx->cs);
+    has = (p_rx->used != 0u) ? 1u : 0u;
+    LeaveCriticalSection((CRITICAL_SECTION *)&p_rx->cs);
+
+    return has;
+}
+
 uint8_t dbg_source_rx_wait_mark(DBG_SOURCE_RX_T *p_rx, const char *p_needle, uint32_t timeout_ms)
 {
     uint32_t start_tick = GetTickCount();

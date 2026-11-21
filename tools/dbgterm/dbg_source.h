@@ -15,7 +15,7 @@
 /* -------------------------------------------------------------------------- */
 /*  宏定义                                                                     */
 /* -------------------------------------------------------------------------- */
-#define DBG_SOURCE_RX_BUF_SIZE   (8u * 1024u)  /**< 接收环形缓冲容量(字节) */
+#define DBG_SOURCE_RX_BUF_SIZE   (4u * 1024u * 1024u)  /**< 接收环形缓冲容量(字节; 大容量支撑选择保护期的数据积压与洪峰突发) */
 #define DBG_SOURCE_THROTTLE_MS   30u           /**< UI通知节流间隔(毫秒) */
 #define DBG_SOURCE_STATUS_LEN    256u          /**< 状态/错误消息最大宽字符数 */
 #define DBG_SOURCE_NOTIFY_NONE   0u            /**< 推入不投递通知 */
@@ -109,6 +109,13 @@ uint32_t dbg_source_rx_drain(DBG_SOURCE_RX_T *p_rx, uint8_t *p_out, uint32_t max
  * @return  自上次取走以来溢出丢弃的字节数
  */
 uint32_t dbg_source_rx_take_overflow(DBG_SOURCE_RX_T *p_rx);
+
+/**
+ * @brief   查询环形缓冲是否有待取数据(线程安全, 无副作用; 供UI节拍早退判断)
+ * @param   p_rx 环形缓冲对象
+ * @return  1: 有数据; 0: 空
+ */
+uint8_t dbg_source_rx_has_data(const DBG_SOURCE_RX_T *p_rx);
 
 /**
  * @brief   等待新到数据中出现指定ASCII标记(不消费数据, 供UI正常显示)

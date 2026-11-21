@@ -252,3 +252,15 @@ uint32_t dbg_frame_flush_idle(DBG_FRAME_T *p_frame, const DBG_FRAME_OPT_T *p_opt
 
     return DBG_FRAME_TRUE;
 }
+
+uint8_t dbg_frame_idle_ready(const DBG_FRAME_T *p_frame)
+{
+    uint32_t now = 0u;
+
+    if ((p_frame == NULL) || (p_frame->line_len == 0u)) {
+        return 0u;
+    }
+
+    now = GetTickCount();
+    return ((now - p_frame->last_byte_tick) >= DBG_FRAME_IDLE_MS) ? 1u : 0u;
+}

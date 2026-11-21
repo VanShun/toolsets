@@ -16,6 +16,7 @@
 #include "dbg_filter.h"
 #include "dbg_conf.h"
 #include "dbg_save.h"
+#include "dbg_frame.h"
 #include "filter_view.h"
 
 /* -------------------------------------------------------------------------- */
@@ -60,14 +61,15 @@
 /* RichEdit着色所需本地定义(避免旧头文件差异) */
 #define FLT_EM_SETCHARFORMAT   (WM_USER + 68)           /**< 设置字符格式消息 */
 #define FLT_EM_POSFROMCHAR     (WM_USER + 58)           /**< 查询字符客户区坐标 */
-#define FLT_EM_GETSCROLLPOS    (WM_USER + 221)          /**< 获取滚动像素位置 */
-#define FLT_EM_SETSCROLLPOS    (WM_USER + 222)          /**< 恢复滚动像素位置 */
+#define FLT_EM_EXGETSEL        (WM_USER + 52)           /**< 查询选区范围(CHARRANGE) */
 #define FLT_EM_GETFIRSTVISIBLELINE 0x00CE                /**< 首可见行号 */
 #define FLT_EM_LINEINDEX       0x00BB                   /**< 行号->字符索引 */
 #define FLT_EM_GETLINECOUNT    0x00BA                   /**< 总行数 */
+#define FLT_EM_SCROLLCARET     (WM_USER + 6)            /**< 最小滚动使光标可见 */
 #define FLT_SCF_SELECTION      0x0001u                  /**< 作用于当前选区 */
 #define FLT_CFM_COLOR          0x40000000u              /**< 颜色掩码 */
 #define FLT_CFE_AUTOCOLOR      0x40000000u              /**< 自动色效果(清除用) */
+#define FLT_VIEW_LINE_WCHAR    (DBG_FRAME_LINE_MAX * 2u) /**< 命中行显示缓冲宽字符容量(与行装配上限同步) */
 
 /* -------------------------------------------------------------------------- */
 /*  内部类型                                                                    */
@@ -87,6 +89,13 @@ typedef struct FLT_CF_TAG
     wchar_t   szFaceName[LF_FACESIZE]; /**< 字体名 */
 } FLT_CF_T;
 
+/** RichEdit选区范围(CHARRANGE布局, 本地定义避免头文件差异) */
+typedef struct FLT_CHARRANGE_TAG
+{
+    LONG      cpMin;                  /**< 选区首字符索引 */
+    LONG      cpMax;                  /**< 选区尾字符索引 */
+} FLT_CHARRANGE_T;
+
 /* -------------------------------------------------------------------------- */
 /*  模块内部全局变量                                                           */
 /* -------------------------------------------------------------------------- */
@@ -103,7 +112,7 @@ static uint32_t  g_flt_rich_len = 0u;                          /**< 日志区字
 static uint32_t  g_flt_batch = 0u;                             /**< 批处理嵌套计数 */
 static uint32_t  g_flt_batch_lines = 0u;                       /**< 本批已追加行数(超限降级为纯追加) */
 static uint8_t   g_flt_stick = 1u;                             /**< 批首底部跟随状态(用户上滚时暂停自动滚动) */
-static POINT     g_flt_scroll_pos = {0, 0};                    /**< 锁定时的滚动像素位置(批量追加后恢复) */
+static uint32_t  g_flt_anchor_ch = 0u;                         /**< 锁定时的可视首行锚点字符(批量追加后钉回) */
 static uint8_t   g_flt_rich_ready = 0u;                        /**< RichEdit探测标志 */
 static uint8_t   g_flt_use_rich = 0u;                          /**< 日志区为RichEdit标志 */
 
@@ -822,6 +831,28 @@ static uint8_t flt_at_bottom(HWND h_log)
     }
 }
 
+/**
+ * @brief   判断用户是否正在过滤日志区选择文本(拖选进行中或已有选区)
+ *          选区存续期间不得做任何光标操作/追加(会清掉选区, 导致无法复制)
+ * @param   h_log 日志区句柄
+ * @return  1: 正在选择或已有选区; 0: 无
+ */
+static uint8_t flt_user_selecting(HWND h_log)
+{
+    FLT_CHARRANGE_T cr;
+
+    if (GetCapture() == h_log) {
+        return 1u;   /* 鼠标按住拖选中 */
+    }
+    if (g_flt_use_rich == 0u) {
+        return 0u;
+    }
+
+    memset(&cr, 0, sizeof(cr));
+    (void)SendMessageW(h_log, FLT_EM_EXGETSEL, 0u, (LPARAM)&cr);
+    return (cr.cpMin != cr.cpMax) ? 1u : 0u;
+}
+
 void filter_view_begin_batch(void)
 {
     if ((g_flt_hwnd == NULL) || (g_flt_batch != 0u)) {
@@ -835,8 +866,11 @@ void filter_view_begin_batch(void)
 
         g_flt_stick = flt_at_bottom(h_log);   /* 批首捕捉跟随状态 */
         if (g_flt_stick == 0u) {
-            /* 锁定: 记录滚动像素位置供批尾恢复 */
-            (void)SendMessageW(h_log, FLT_EM_GETSCROLLPOS, 0u, (LPARAM)&g_flt_scroll_pos);
+            /* 锁定: 记录可视首行锚点字符供批尾钉回(对排版漂移免疫) */
+            LRESULT first_line = SendMessageW(h_log, FLT_EM_GETFIRSTVISIBLELINE, 0u, 0u);
+            LRESULT ch = SendMessageW(h_log, FLT_EM_LINEINDEX, (WPARAM)first_line, 0u);
+
+            g_flt_anchor_ch = (ch >= 0) ? (uint32_t)ch : 0u;
         }
         /* 整批仅一次: 解锁+关重绘, 避免逐行解锁引发的重排/重绘风暴 */
         (void)SendMessageW(h_log, WM_SETREDRAW, (WPARAM)FALSE, (LPARAM)0);
@@ -857,23 +891,26 @@ void filter_view_end_batch(void)
         HWND h_log = GetDlgItem(g_flt_hwnd, (int)FLT_VIEW_IDC_ED_LOG);
 
         (void)SendMessageW(h_log, EM_SETREADONLY, (WPARAM)TRUE, (LPARAM)0);
-        (void)SendMessageW(h_log, WM_SETREDRAW, (WPARAM)TRUE, (LPARAM)0);
-        (void)InvalidateRect(h_log, NULL, FALSE);
+        if (g_flt_batch_lines == 0u) {
+            /* 本批无追加: 只恢复控件状态, 不做任何失效/光标操作
+               (每拍空转整域失效=无数据也闪烁) */
+            (void)SendMessageW(h_log, WM_SETREDRAW, (WPARAM)TRUE, (LPARAM)0);
+            return;
+        }
         if (g_flt_stick != 0u) {
+            /* 跟随: 开重绘+整域失效+拉底 */
+            (void)SendMessageW(h_log, WM_SETREDRAW, (WPARAM)TRUE, (LPARAM)0);
+            (void)InvalidateRect(h_log, NULL, FALSE);
             (void)SendMessageW(h_log, EM_SETSEL, (WPARAM)g_flt_rich_pos,
                                (LPARAM)g_flt_rich_pos);
             (void)SendMessageW(h_log, WM_VSCROLL, (WPARAM)SB_BOTTOM, (LPARAM)0);
         } else {
-            /* 锁定: 恢复批首滚动位置并把光标移回可视首行(防文末光标再次拉底) */
-            LRESULT first_line = 0;
-            LRESULT ch = 0;
-
-            (void)SendMessageW(h_log, FLT_EM_SETSCROLLPOS, 0u, (LPARAM)&g_flt_scroll_pos);
-            first_line = SendMessageW(h_log, FLT_EM_GETFIRSTVISIBLELINE, 0u, 0u);
-            ch = SendMessageW(h_log, FLT_EM_LINEINDEX, (WPARAM)first_line, 0u);
-            if (ch >= 0) {
-                (void)SendMessageW(h_log, EM_SETSEL, (WPARAM)ch, (LPARAM)ch);
-            }
+            /* 锁定: 光标钉回锚点行并最小滚回(批量追加把文末光标滚入视野),
+               开重绘后不做整域失效——可视区内容未变, 整域重绘=闪烁 */
+            (void)SendMessageW(h_log, EM_SETSEL, (WPARAM)g_flt_anchor_ch,
+                               (LPARAM)g_flt_anchor_ch);
+            (void)SendMessageW(h_log, WM_SETREDRAW, (WPARAM)TRUE, (LPARAM)0);
+            (void)SendMessageW(h_log, FLT_EM_SCROLLCARET, 0u, 0u);
         }
     }
 }
@@ -882,7 +919,7 @@ void filter_view_append_hit(const wchar_t *p_line, uint32_t group_idx)
 {
     HWND h_log = NULL;
     DBG_FILTER_GROUP_T grp;
-    wchar_t buf[1200u];
+    wchar_t buf[FLT_VIEW_LINE_WCHAR];
     uint32_t base = 0u;
     uint32_t marker_len = 0u;
     uint32_t len = 0u;
@@ -895,6 +932,20 @@ void filter_view_append_hit(const wchar_t *p_line, uint32_t group_idx)
     h_log = GetDlgItem(g_flt_hwnd, (int)FLT_VIEW_IDC_ED_LOG);
     memset(&grp, 0, sizeof(grp));
     dbg_filter_get_group(group_idx, &grp);
+
+    if (flt_user_selecting(h_log) != 0u) {
+        /* 用户在日志区选择中: 命中行仅落保存通道, 暂不显示追加
+           (任何光标操作/EM_REPLACESEL都会清掉选区, 导致无法复制) */
+        wchar_t sbuf[FLT_VIEW_LINE_WCHAR];
+        uint32_t ml = (uint32_t)wsprintfW(&sbuf[0], L">>K%u ",
+                                          (unsigned int)(group_idx + 1u));
+
+        (void)lstrcpynW(&sbuf[ml], p_line,
+                        (int)(FLT_VIEW_LINE_WCHAR - ml - 2u));
+        (void)lstrcatW(&sbuf[0], L"\r\n");
+        dbg_save_feed_ch(DBG_SAVE_CH_FILTER, &sbuf[0]);
+        return;
+    }
 
     if (g_flt_batch == 0u) {
         filter_view_begin_batch();   /* 独立调用: 自包裹批量上下文 */
@@ -934,7 +985,7 @@ void filter_view_append_hit(const wchar_t *p_line, uint32_t group_idx)
 
     /* 追加整行: >>K行号 前缀 + 行文本 + CRLF (默认黑色) */
     marker_len = (uint32_t)wsprintfW(&buf[0], L">>K%u ", (unsigned int)(group_idx + 1u));
-    (void)lstrcpynW(&buf[marker_len], p_line, (int)(1200u - marker_len - 2u));
+    (void)lstrcpynW(&buf[marker_len], p_line, (int)(FLT_VIEW_LINE_WCHAR - marker_len - 2u));
     (void)lstrcatW(&buf[0], L"\r\n");
 
     if (g_flt_use_rich != 0u) {
